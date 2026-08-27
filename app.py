@@ -1,37 +1,37 @@
-#streamlit run app.py
 import os
 import re
+import smtplib
 import tempfile
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+from bs4 import BeautifulSoup
+from fpdf import FPDF
 import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 import streamlit as st
-from bs4 import BeautifulSoup
-from fpdf import FPDF
 
+# ==============================================================================
 # 1. PAGE SETUP
+# ==============================================================================
 st.set_page_config(
     page_title="Market Price Audit Dashboard",
     page_icon="📊",
     layout="wide",
 )
 
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import os
-import smtplib
 
-
+# ==============================================================================
+# 2. EMAIL ALERT HELPER FUNCTION
+# ==============================================================================
 def send_price_alert(overpriced_df, recipient_email):
   """Sends an HTML email alert when competitor prices undercut client prices."""
   if overpriced_df.empty:
     st.info("No price drops detected. Skipping email alert.")
     return False
 
-  # Replace with your actual sender Gmail and 16-char App Password
-  sender_email = os.environ.get(
-      "ALERT_EMAIL_USER", "krccjc8@gmail.com"
-  )
+  sender_email = os.environ.get("ALERT_EMAIL_USER", "krccjc8@gmail.com")
   sender_password = os.environ.get("ALERT_EMAIL_PASS", "bhhsqantckaklpvz")
 
   msg = MIMEMultipart("alternative")
@@ -41,13 +41,12 @@ def send_price_alert(overpriced_df, recipient_email):
 
   table_rows = ""
   for _, row in overpriced_df.iterrows():
-    diff_val = row.get("Difference (£)", row.get("Diff (£)", 0.0))
     table_rows += f"""
         <tr>
             <td style="padding: 8px; border: 1px solid #ddd;">{row['Product']}</td>
-            <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">£{row['Price (£)']:.2f}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">£{row['Client Price (£)']:.2f}</td>
             <td style="padding: 8px; border: 1px solid #ddd; text-align: center; color: #dc2626;">£{row['Comp Avg (£)']:.2f}</td>
-            <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold;">+£{diff_val:.2f}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold; color: #dc2626;">+£{row['Difference (£)']:.2f}</td>
         </tr>
         """
 
@@ -81,42 +80,27 @@ def send_price_alert(overpriced_df, recipient_email):
     st.error(f"Failed to send email: {e}")
     return False
 
-# 2. PDF GENERATION HELPER FUNCTION
-def generate_pdf_bytes(df_to_report):
-  client_name = "Our Client"
-  client_data = df_to_report[df_to_report["Shop"] == client_name]
-  comp_data = df_to_report[df_to_report["Shop"] != client_name]
 
-  comp_market_avg = comp_data["Price (£)"].mean() if not comp_data.empty else 0
-  client_market_avg = (
-      client_data["Price (£)"].mean() if not client_data.empty else 0
-  )
+# ==============================================================================
+# 3. PDF GENERATION HELPER FUNCTION WITH COLOR-CODED ROWS
+# ==============================================================================
+def generate_pdf_bytes(audit_df):
+  if audit_df.empty:
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "No audit data available for PDF generation.", ln=True)
+    return pdf.output(dest="S")
 
-  comp_avg_per_item = (
-      comp_data.groupby("Product")["Price (£)"]
-      .mean()
-      .reset_index()
-      .rename(columns={"Price (£)": "Comp Avg (£)"})
-  )
-
-  comparison = pd.merge(
-      client_data, comp_avg_per_item, on="Product", how="inner"
-  )
-  if comparison.empty:
-    comparison = client_data.copy()
-    comparison["Comp Avg (£)"] = comp_market_avg
-
-  comparison["Difference (£)"] = (
-      comparison["Price (£)"] - comparison["Comp Avg (£)"]
-  ).round(2)
-
-  overpriced_count = len(comparison[comparison["Difference (£)"] > 0])
-  underpriced_count = len(comparison[comparison["Difference (£)"] < 0])
+  comp_market_avg = audit_df["Comp Avg (£)"].mean()
+  client_market_avg = audit_df["Client Price (£)"].mean()
+  overpriced_count = len(audit_df[audit_df["Difference (£)"] > 0])
+  underpriced_count = len(audit_df[audit_df["Difference (£)"] < 0])
   price_diff = client_market_avg - comp_market_avg
 
-  comparison = comparison.head(8)
+  comparison = audit_df.head(8)
 
-  # 1. Create temporary chart image file
+  # Generate Chart Image
   temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
   temp_img_path = temp_img.name
   temp_img.close()
@@ -126,7 +110,7 @@ def generate_pdf_bytes(df_to_report):
   width = 0.35
   ax.bar(
       [i - width / 2 for i in x],
-      comparison["Price (£)"],
+      comparison["Client Price (£)"],
       width,
       label="Our Client",
       color="#1E3A8A",
@@ -147,15 +131,13 @@ def generate_pdf_bytes(df_to_report):
   ax.spines["right"].set_visible(False)
   ax.legend()
   plt.tight_layout()
-
   plt.savefig(temp_img_path, dpi=200)
   plt.close(fig)
 
-  # 2. Build PDF Document
+  # Build FPDF Document
   pdf = FPDF()
   pdf.add_page()
 
-  # Title Header
   pdf.set_font("Arial", "B", 16)
   pdf.cell(
       0,
@@ -166,7 +148,7 @@ def generate_pdf_bytes(df_to_report):
   )
   pdf.ln(3)
 
-  # Dynamic Insights Block
+  # Dynamic Insights
   pdf.set_font("Arial", "B", 11)
   pdf.set_text_color(30, 58, 138)
   pdf.cell(0, 6, txt="Automated Market Insights:", ln=True)
@@ -183,25 +165,23 @@ def generate_pdf_bytes(df_to_report):
   pdf.multi_cell(0, 5, text=str(insight_pos))
 
   if overpriced_count > 0:
-      insight_risk = (
-          f"* Key Risk: {overpriced_count} product(s) sit above market average."
-      )
-      pdf.ln(5)
-      pdf.set_x(pdf.l_margin)
-      pdf.multi_cell(0, 5, text=str(insight_risk))
+    insight_risk = (
+        f"* Key Risk: {overpriced_count} product(s) sit above market average."
+    )
+    pdf.ln(3)
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(0, 5, text=str(insight_risk))
 
   if underpriced_count > 0:
-      insight_opp = (
-          f"* Opportunity: {underpriced_count} product(s) sit below benchmark"
-          " (margin potential)."
-      )
-      pdf.ln(5)  # Move down to a new line
-      pdf.set_x(pdf.l_margin)  # Reset X position back to left margin
-      pdf.multi_cell(0, 5, text=str(insight_opp))  # Render text using fpdf2 syntax
+    insight_opp = (
+        f"* Opportunity: {underpriced_count} product(s) sit below benchmark"
+        " (margin potential)."
+    )
+    pdf.ln(3)
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(0, 5, text=str(insight_opp))
 
   pdf.ln(4)
-
-  # Embed Chart
   pdf.image(temp_img_path, x=15, w=180)
   pdf.ln(4)
 
@@ -217,46 +197,55 @@ def generate_pdf_bytes(df_to_report):
   pdf.cell(w_diff, 7, "Variance (\xa3)", border=1, align="C", fill=True)
   pdf.ln()
 
-  # Audit Table Rows
+  # Color-Coded Table Rows
   pdf.set_font("Arial", "", 8)
-  pdf.set_text_color(51, 65, 85)
-  for idx, row in comparison.iterrows():
+  pdf.set_text_color(0, 0, 0)
+
+  for _, row in audit_df.iterrows():
     diff_val = row["Difference (£)"]
     diff_str = f"+{diff_val:.2f}" if diff_val > 0 else f"{diff_val:.2f}"
     clean_title = (
         str(row["Product"]).encode("latin-1", "replace").decode("latin-1")[:38]
     )
 
-    pdf.cell(w_item, 6, clean_title, border=1, align="L")
-    pdf.cell(w_client, 6, f"{row['Price (£)']:.2f}", border=1, align="C")
-    pdf.cell(w_comp, 6, f"{row['Comp Avg (£)']:.2f}", border=1, align="C")
-    pdf.cell(w_diff, 6, diff_str, border=1, align="C")
+    # Light Red for overpriced, Light Green for underpriced
+    if diff_val > 0:
+      pdf.set_fill_color(254, 226, 226)
+    elif diff_val < 0:
+      pdf.set_fill_color(220, 252, 231)
+    else:
+      pdf.set_fill_color(255, 255, 255)
+
+    pdf.cell(w_item, 6, clean_title, border=1, align="L", fill=True)
+    pdf.cell(
+        w_client,
+        6,
+        f"{row['Client Price (£)']:.2f}",
+        border=1,
+        align="C",
+        fill=True,
+    )
+    pdf.cell(
+        w_comp, 6, f"{row['Comp Avg (£)']:.2f}", border=1, align="C", fill=True
+    )
+    pdf.cell(w_diff, 6, diff_str, border=1, align="C", fill=True)
     pdf.ln()
-
-  # 3. Output PDF Bytes & Cleanup
-  temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-  temp_pdf_path = temp_pdf.name
-  temp_pdf.close()
-
-  pdf.output(temp_pdf_path)
-
-  with open(temp_pdf_path, "rb") as f:
-    pdf_bytes = f.read()
 
   if os.path.exists(temp_img_path):
     os.remove(temp_img_path)
-  if os.path.exists(temp_pdf_path):
-    os.remove(temp_pdf_path)
 
-  return pdf_bytes
+  return pdf.output(dest="S")
 
-# 3. LIVE SCRAPER FUNCTION (Cached for 1 hour)
+
+# ==============================================================================
+# 4. LIVE SCRAPER FUNCTION
+# ==============================================================================
 @st.cache_data(ttl=3600)
 def load_and_scrape_data():
   targets_df = pd.read_csv("targets.csv")
   scraped_dataframes = []
-
   headers = {"User-Agent": "Mozilla/5.0"}
+
   for _, row in targets_df.iterrows():
     try:
       response = requests.get(row["URL"], headers=headers, timeout=5)
@@ -273,27 +262,46 @@ def load_and_scrape_data():
     except Exception as e:
       st.error(f"Could not scrape {row['Shop']}: {e}")
 
-  return pd.concat(scraped_dataframes, ignore_index=True)
+  return (
+      pd.concat(scraped_dataframes, ignore_index=True)
+      if scraped_dataframes
+      else pd.DataFrame()
+  )
 
 
 with st.spinner("Scraping live target sites..."):
   df = load_and_scrape_data()
 
-
 # ==============================================================================
-# 4. SIDEBAR CONTROLS (EVERYTHING IN THE LEFT PANEL LIVES HERE)
+# 5. SIDEBAR CONTROLS & ADVANCED FILTERS
 # ==============================================================================
 st.sidebar.header("Filter Options")
 
-# Store Multiselect
-all_shops = list(df["Shop"].unique())
-selected_shops = st.sidebar.multiselect(
-    "Select Stores to Compare", options=all_shops, default=all_shops
+all_shops = list(df["Shop"].unique()) if not df.empty else []
+
+# Client Store Selection
+client_shop = st.sidebar.selectbox(
+    "Select Your Store (Client)",
+    options=all_shops,
+    index=0 if all_shops else 0,
 )
 
-# Price Range Slider
-min_p = float(df["Price (£)"].min())
-max_p = float(df["Price (£)"].max())
+# Competitor Store Selection
+comp_shops_options = [s for s in all_shops if s != client_shop]
+selected_comps = st.sidebar.multiselect(
+    "Select Competitor Stores",
+    options=comp_shops_options,
+    default=comp_shops_options,
+)
+
+# Advanced Search & Price Sliders
+st.sidebar.markdown("---")
+st.sidebar.subheader("Advanced Filters")
+
+search_query = st.sidebar.text_input("Search Product Title", "")
+
+min_p = float(df["Price (£)"].min()) if not df.empty else 0.0
+max_p = float(df["Price (£)"].max()) if not df.empty else 100.0
 price_range = st.sidebar.slider(
     "Filter by Price (£)",
     min_value=min_p,
@@ -301,19 +309,86 @@ price_range = st.sidebar.slider(
     value=(min_p, max_p),
 )
 
-# Apply Filters to Master Data
+target_margin = st.sidebar.slider(
+    "Target Profit Margin (%)", min_value=5, max_value=50, value=15
+)
+
+# ==============================================================================
+# 6. DATA PROCESSING & METRICS COMPUTATION
+# ==============================================================================
 filtered_df = df[
-    (df["Shop"].isin(selected_shops))
-    & (df["Price (£)"] >= price_range[0])
-    & (df["Price (£)"] <= price_range[1])
-]
+    (df["Price (£)"] >= price_range[0]) & (df["Price (£)"] <= price_range[1])
+].copy()
 
-# Export Section inside Sidebar
-st.sidebar.divider()
-st.sidebar.subheader("Export Options")
+if search_query:
+  filtered_df = filtered_df[
+      filtered_df["Product"].str.contains(search_query, case=False, na=False)
+  ]
 
-pdf_data = generate_pdf_bytes(filtered_df)
+client_df = filtered_df[filtered_df["Shop"] == client_shop]
+comp_df = filtered_df[filtered_df["Shop"].isin(selected_comps)]
 
+if not client_df.empty and not comp_df.empty:
+  comp_avg = (
+      comp_df.groupby("Product")["Price (£)"]
+      .mean()
+      .reset_index()
+      .rename(columns={"Price (£)": "Comp Avg (£)"})
+  )
+
+  audit_df = pd.merge(
+      client_df[["Product", "Price (£)"]].rename(
+          columns={"Price (£)": "Client Price (£)"}
+      ),
+      comp_avg,
+      on="Product",
+      how="inner",
+  )
+
+  audit_df["Client Price (£)"] = audit_df["Client Price (£)"].round(2)
+  audit_df["Comp Avg (£)"] = audit_df["Comp Avg (£)"].round(2)
+  audit_df["Difference (£)"] = (
+      audit_df["Client Price (£)"] - audit_df["Comp Avg (£)"]
+  ).round(2)
+  audit_df["Recommended Price (£)"] = (
+      audit_df["Comp Avg (£)"] * (1 + (target_margin / 100))
+  ).round(2)
+else:
+  audit_df = pd.DataFrame(
+      columns=[
+          "Product",
+          "Client Price (£)",
+          "Comp Avg (£)",
+          "Difference (£)",
+          "Recommended Price (£)",
+      ]
+  )
+
+# Compute Core Metrics
+total_audited = len(audit_df)
+avg_client_price = (
+    audit_df["Client Price (£)"].mean() if total_audited > 0 else 0.0
+)
+avg_market_price = (
+    audit_df["Comp Avg (£)"].mean() if total_audited > 0 else 0.0
+)
+
+overpriced_df = (
+    audit_df[audit_df["Difference (£)"] > 0] if total_audited > 0 else audit_df
+)
+underpriced_df = (
+    audit_df[audit_df["Difference (£)"] < 0] if total_audited > 0 else audit_df
+)
+
+overpriced_count = len(overpriced_df)
+underpriced_count = len(underpriced_df)
+avg_diff = audit_df["Difference (£)"].mean() if total_audited > 0 else 0.0
+
+# Sidebar Downloads
+st.sidebar.markdown("---")
+st.sidebar.subheader("Export & Alerts")
+
+pdf_data = generate_pdf_bytes(audit_df)
 st.sidebar.download_button(
     label="📄 Download PDF Market Audit",
     data=pdf_data,
@@ -322,98 +397,28 @@ st.sidebar.download_button(
     use_container_width=True,
 )
 
-
 # ==============================================================================
-# UPGRADED STREAMLIT SIDEBAR & FILTERS
-# ==============================================================================
-st.sidebar.markdown("---")
-st.sidebar.subheader("Advanced Filters")
-
-# 1. Category Filter (Assuming you have a 'Category' column, otherwise skips safely)
-if "Category" in df.columns:
-    categories = st.sidebar.multiselect(
-        "Select Categories", options=df["Category"].unique(), default=df["Category"].unique()
-    )
-    filtered_df = filtered_df[filtered_df["Category"].isin(categories)]
-
-# ==============================================================================
-# 1. CALCULATIONS & DATA PREPARATION
-# ==============================================================================
-# Detect competitor column dynamically
-possible_comp_cols = [
-    "Comp Avg (£)",
-    "Market Avg (£)",
-    "Competitor Price (£)",
-    "Benchmark (£)",
-    "Market Price (£)",
-]
-comp_col = next(
-    (col for col in possible_comp_cols if col in filtered_df.columns), None
-)
-
-if comp_col and "Price (£)" in filtered_df.columns:
-  # Recalculate Difference (£) to ensure non-zero values
-  filtered_df["Difference (£)"] = filtered_df["Price (£)"] - filtered_df[comp_col]
-
-  # Calculate Recommended Price rounded to 2 decimal places
-  target_margin = st.sidebar.slider(
-      "Target Profit Margin (%)", min_value=5, max_value=50, value=15
-  )
-  filtered_df["Recommended Price (£)"] = (
-      filtered_df[comp_col] * (1 + (target_margin / 100))
-  ).round(2)
-else:
-  target_margin = 15
-
-# Calculate Key Figures
-total_audited = len(filtered_df)
-avg_client_price = (
-    filtered_df["Price (£)"].mean()
-    if "Price (£)" in filtered_df.columns
-    else 0.0
-)
-avg_market_price = (
-    filtered_df[comp_col].mean() if comp_col else 0.0
-)
-
-overpriced_df = (
-    filtered_df[filtered_df["Difference (£)"] > 0]
-    if "Difference (£)" in filtered_df.columns
-    else pd.DataFrame()
-)
-underpriced_df = (
-    filtered_df[filtered_df["Difference (£)"] < 0]
-    if "Difference (£)" in filtered_df.columns
-    else pd.DataFrame()
-)
-
-overpriced_count = len(overpriced_df)
-underpriced_count = len(underpriced_df)
-avg_diff = (
-    filtered_df["Difference (£)"].mean()
-    if "Difference (£)" in filtered_df.columns
-    else 0.0
-)
-
-# ==============================================================================
-# 2. HEADER & ALL 6 METRIC CARDS
+# 7. DASHBOARD HEADER & ALL 6 METRIC CARDS
 # ==============================================================================
 st.title("📊 Market Intelligence & Audit Dashboard")
 
 st.subheader("Overview Metrics")
-# Row 1: Original 3 Metrics
 col1, col2, col3 = st.columns(3)
 col1.metric("Total Products Audited", total_audited)
 col2.metric("Avg Client Price", f"£{avg_client_price:.2f}")
 col3.metric("Avg Market Price", f"£{avg_market_price:.2f}")
 
-# Row 2: Additional Strategy KPIs
 col4, col5, col6 = st.columns(3)
 col4.metric(
-    "Overpriced Items (Risk)", overpriced_count, delta=f"{overpriced_count} items", delta_color="inverse"
+    "Overpriced Items (Risk)",
+    overpriced_count,
+    delta=f"{overpriced_count} items",
+    delta_color="inverse",
 )
 col5.metric(
-    "Underpriced Items (Opportunity)", underpriced_count, delta=f"{underpriced_count} items"
+    "Underpriced Items (Opportunity)",
+    underpriced_count,
+    delta=f"{underpriced_count} items",
 )
 col6.metric(
     "Avg Price Difference",
@@ -425,7 +430,7 @@ col6.metric(
 st.markdown("---")
 
 # ==============================================================================
-# 3. RESTORED DYNAMIC EXECUTIVE INSIGHTS
+# 8. RESTORED DYNAMIC EXECUTIVE INSIGHTS
 # ==============================================================================
 st.subheader("💡 Automated Insights")
 pos_direction = "HIGHER" if avg_diff > 0 else "LOWER"
@@ -448,43 +453,55 @@ if underpriced_count > 0:
 st.markdown("---")
 
 # ==============================================================================
-# 4. TABLES (ORIGINAL & RECOMMENDED STRATEGY)
+# 9. COLOR-CODED TABLES (ORIGINAL & STRATEGY TARGETS)
 # ==============================================================================
-# Table 1: Original Audit Table
+
+
+# Color styling function for Streamlit DataFrames
+def style_difference(val):
+  if val > 0:
+    return (
+        "background-color: #fee2e2; color: #991b1b; font-weight: bold;"
+    )  # Red
+  elif val < 0:
+    return (
+        "background-color: #dcfce7; color: #166534; font-weight: bold;"
+    )  # Green
+  return ""
+
+
 st.subheader("📋 Original Market Comparison Registry")
-orig_cols = [
-    col
-    for col in ["Product", "Price (£)", comp_col, "Difference (£)"]
-    if col in filtered_df.columns
+orig_display = audit_df[
+    ["Product", "Client Price (£)", "Comp Avg (£)", "Difference (£)"]
 ]
-st.dataframe(filtered_df[orig_cols], use_container_width=True)
+st.dataframe(
+    orig_display.style.map(style_difference, subset=["Difference (£)"]),
+    use_container_width=True,
+)
 
-# Table 2: Pricing Strategy Table with Rounded Recommended Price
 st.subheader("🎯 Recommended Pricing Targets")
-rec_cols = [
-    col
-    for col in [
-        "Product",
-        "Price (£)",
-        comp_col,
-        "Recommended Price (£)",
-    ]
-    if col in filtered_df.columns
+rec_display = audit_df[
+    ["Product", "Client Price (£)", "Comp Avg (£)", "Recommended Price (£)"]
 ]
-# Format currency display explicitly
-formatted_rec_df = filtered_df[rec_cols].copy()
-if "Recommended Price (£)" in formatted_rec_df.columns:
-  formatted_rec_df["Recommended Price (£)"] = formatted_rec_df[
-      "Recommended Price (£)"
-  ].map("£{:.2f}".format)
+st.dataframe(rec_display, use_container_width=True)
 
-st.dataframe(formatted_rec_df, use_container_width=True)
-
-# CSV Export Button
-csv_data = filtered_df.to_csv(index=False).encode("utf-8")
+csv_data = audit_df.to_csv(index=False).encode("utf-8")
 st.download_button(
     label="📥 Download Full Audit Data (CSV)",
     data=csv_data,
     file_name="market_audit_data.csv",
     mime="text/csv",
 )
+
+# ==============================================================================
+# 10. EMAIL REPORT DISPATCH SECTION
+# ==============================================================================
+st.markdown("---")
+st.subheader("📧 Dispatch Email Report")
+recipient_email = st.text_input(
+    "Recipient Email Address", value="client@example.com"
+)
+if st.button("✉️ Send Market Alert Email"):
+  success = send_price_alert(overpriced_df, recipient_email)
+  if success:
+    st.success(f"Audit report successfully delivered to **{recipient_email}**!")
