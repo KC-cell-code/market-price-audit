@@ -179,22 +179,25 @@ def generate_pdf_bytes(df_to_report):
       f"* Positioning: Client products average \xa3{abs(price_diff):.2f}"
       f" {pos_direction} than the benchmark."
   )
-  pdf.multi_cell(0, 5, txt=insight_pos)
+  pdf.set_x(pdf.l_margin)
+  pdf.multi_cell(0, 5, text=str(insight_pos))
 
   if overpriced_count > 0:
-    insight_risk = (
-        f"* Key Risk: {overpriced_count} product(s) sit above market average."
-    )
-    pdf.ln(5)  # Move down to a new line
-    pdf.set_x(pdf.l_margin)  # Reset X position back to left margin
-    pdf.multi_cell(0, 5, text=str(insight_risk))  # Render text using fpdf2 syntax
+      insight_risk = (
+          f"* Key Risk: {overpriced_count} product(s) sit above market average."
+      )
+      pdf.ln(5)
+      pdf.set_x(pdf.l_margin)
+      pdf.multi_cell(0, 5, text=str(insight_risk))
 
   if underpriced_count > 0:
-    insight_opp = (
-        f"* Opportunity: {underpriced_count} product(s) sit below benchmark"
-        " (margin potential)."
-    )
-    pdf.multi_cell(0, 5, txt=insight_opp)
+      insight_opp = (
+          f"* Opportunity: {underpriced_count} product(s) sit below benchmark"
+          " (margin potential)."
+      )
+      pdf.ln(5)  # Move down to a new line
+      pdf.set_x(pdf.l_margin)  # Reset X position back to left margin
+      pdf.multi_cell(0, 5, text=str(insight_opp))  # Render text using fpdf2 syntax
 
   pdf.ln(4)
 
