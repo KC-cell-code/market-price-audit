@@ -185,7 +185,9 @@ def generate_pdf_bytes(df_to_report):
     insight_risk = (
         f"* Key Risk: {overpriced_count} product(s) sit above market average."
     )
-    pdf.multi_cell(0, 5, txt=insight_risk)
+    pdf.ln(5)  # Move down to a new line
+    pdf.set_x(pdf.l_margin)  # Reset X position back to left margin
+    pdf.multi_cell(0, 5, text=str(insight_risk))  # Render text using fpdf2 syntax
 
   if underpriced_count > 0:
     insight_opp = (
