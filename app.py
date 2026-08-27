@@ -336,48 +336,155 @@ if "Category" in df.columns:
     )
     filtered_df = filtered_df[filtered_df["Category"].isin(categories)]
 
-# 1. Target Profit Margin Slider
-target_margin = st.sidebar.slider("Target Profit Margin (%)", min_value=5, max_value=50, value=15)
+# ==============================================================================
+# 1. CALCULATIONS & DATA PREPARATION
+# ==============================================================================
+# Detect competitor column dynamically
+possible_comp_cols = [
+    "Comp Avg (£)",
+    "Market Avg (£)",
+    "Competitor Price (£)",
+    "Benchmark (£)",
+    "Market Price (£)",
+]
+comp_col = next(
+    (col for col in possible_comp_cols if col in filtered_df.columns), None
+)
 
-# 2. Automatically find your market/competitor column
-possible_comp_cols = ["Comp Avg (£)", "Market Avg (£)", "Competitor Price (£)", "Benchmark (£)", "Market Price (£)"]
-comp_col = next((col for col in possible_comp_cols if col in filtered_df.columns), None)
+if comp_col and "Price (£)" in filtered_df.columns:
+  # Recalculate Difference (£) to ensure non-zero values
+  filtered_df["Difference (£)"] = filtered_df["Price (£)"] - filtered_df[comp_col]
 
-# 3. Calculate Recommended Price safely
-if comp_col:
-    filtered_df["Recommended Price (£)"] = filtered_df[comp_col] * (1 + (target_margin / 100))
+  # Calculate Recommended Price rounded to 2 decimal places
+  target_margin = st.sidebar.slider(
+      "Target Profit Margin (%)", min_value=5, max_value=50, value=15
+  )
+  filtered_df["Recommended Price (£)"] = (
+      filtered_df[comp_col] * (1 + (target_margin / 100))
+  ).round(2)
 else:
-    # Fallback to base price if no competitor column is detected
-    filtered_df["Recommended Price (£)"] = filtered_df["Price (£)"] * (1 + (target_margin / 100))
+  target_margin = 15
+
+# Calculate Key Figures
+total_audited = len(filtered_df)
+avg_client_price = (
+    filtered_df["Price (£)"].mean()
+    if "Price (£)" in filtered_df.columns
+    else 0.0
+)
+avg_market_price = (
+    filtered_df[comp_col].mean() if comp_col else 0.0
+)
+
+overpriced_df = (
+    filtered_df[filtered_df["Difference (£)"] > 0]
+    if "Difference (£)" in filtered_df.columns
+    else pd.DataFrame()
+)
+underpriced_df = (
+    filtered_df[filtered_df["Difference (£)"] < 0]
+    if "Difference (£)" in filtered_df.columns
+    else pd.DataFrame()
+)
+
+overpriced_count = len(overpriced_df)
+underpriced_count = len(underpriced_df)
+avg_diff = (
+    filtered_df["Difference (£)"].mean()
+    if "Difference (£)" in filtered_df.columns
+    else 0.0
+)
 
 # ==============================================================================
-# MAIN DASHBOARD METRICS & TABLE
+# 2. HEADER & ALL 6 METRIC CARDS
 # ==============================================================================
 st.title("📊 Market Intelligence & Audit Dashboard")
 
-# KPI Cards
-total_audited = len(filtered_df)
-overpriced_count = len(filtered_df[filtered_df["Difference (£)"] > 0]) if "Difference (£)" in filtered_df.columns else 0
-avg_diff = filtered_df["Difference (£)"].mean() if "Difference (£)" in filtered_df.columns else 0.0
+st.subheader("Overview Metrics")
+# Row 1: Original 3 Metrics
+col1, col2, col3 = st.columns(3)
+col1.metric("Total Products Audited", total_audited)
+col2.metric("Avg Client Price", f"£{avg_client_price:.2f}")
+col3.metric("Avg Market Price", f"£{avg_market_price:.2f}")
 
-kpi1, kpi2, kpi3 = st.columns(3)
-kpi1.metric("Total Products Audited", total_audited)
-kpi2.metric("Overpriced Items (Risk)", overpriced_count, f"{overpriced_count} items")
-kpi3.metric("Avg Price Difference", f"£{abs(avg_diff):.2f}", f"{'Above' if avg_diff > 0 else 'Below'} Market", delta_color="inverse")
+# Row 2: Additional Strategy KPIs
+col4, col5, col6 = st.columns(3)
+col4.metric(
+    "Overpriced Items (Risk)", overpriced_count, delta=f"{overpriced_count} items", delta_color="inverse"
+)
+col5.metric(
+    "Underpriced Items (Opportunity)", underpriced_count, delta=f"{underpriced_count} items"
+)
+col6.metric(
+    "Avg Price Difference",
+    f"£{abs(avg_diff):.2f}",
+    delta=f"{'Above' if avg_diff > 0 else 'Below'} Market",
+    delta_color="inverse",
+)
 
 st.markdown("---")
 
-# Data Table & CSV Export
-st.subheader("📋 Detailed Product Registry")
+# ==============================================================================
+# 3. RESTORED DYNAMIC EXECUTIVE INSIGHTS
+# ==============================================================================
+st.subheader("💡 Automated Insights")
+pos_direction = "HIGHER" if avg_diff > 0 else "LOWER"
+st.write(
+    f"• **Positioning:** Client products average **£{abs(avg_diff):.2f}"
+    f" {pos_direction}** than the market benchmark."
+)
 
-# Dynamically build display columns to avoid KeyErrors
-display_cols = [col for col in ["Product", "Price (£)", comp_col, "Difference (£)", "Recommended Price (£)"] if col and col in filtered_df.columns]
-st.dataframe(filtered_df[display_cols], use_container_width=True)
+if overpriced_count > 0:
+  st.write(
+      f"• **Key Risk:** **{overpriced_count} product(s)** sit above market"
+      " average price."
+  )
+if underpriced_count > 0:
+  st.write(
+      f"• **Opportunity:** **{underpriced_count} product(s)** sit below"
+      " benchmark (margin expansion potential)."
+  )
 
-csv_data = filtered_df.to_csv(index=False).encode('utf-8')
+st.markdown("---")
+
+# ==============================================================================
+# 4. TABLES (ORIGINAL & RECOMMENDED STRATEGY)
+# ==============================================================================
+# Table 1: Original Audit Table
+st.subheader("📋 Original Market Comparison Registry")
+orig_cols = [
+    col
+    for col in ["Product", "Price (£)", comp_col, "Difference (£)"]
+    if col in filtered_df.columns
+]
+st.dataframe(filtered_df[orig_cols], use_container_width=True)
+
+# Table 2: Pricing Strategy Table with Rounded Recommended Price
+st.subheader("🎯 Recommended Pricing Targets")
+rec_cols = [
+    col
+    for col in [
+        "Product",
+        "Price (£)",
+        comp_col,
+        "Recommended Price (£)",
+    ]
+    if col in filtered_df.columns
+]
+# Format currency display explicitly
+formatted_rec_df = filtered_df[rec_cols].copy()
+if "Recommended Price (£)" in formatted_rec_df.columns:
+  formatted_rec_df["Recommended Price (£)"] = formatted_rec_df[
+      "Recommended Price (£)"
+  ].map("£{:.2f}".format)
+
+st.dataframe(formatted_rec_df, use_container_width=True)
+
+# CSV Export Button
+csv_data = filtered_df.to_csv(index=False).encode("utf-8")
 st.download_button(
-    label="📥 Download Raw Data (CSV)",
+    label="📥 Download Full Audit Data (CSV)",
     data=csv_data,
-    file_name="market_audit_raw.csv",
-    mime="text/csv"
+    file_name="market_audit_data.csv",
+    mime="text/csv",
 )
