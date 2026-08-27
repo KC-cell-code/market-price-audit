@@ -324,156 +324,58 @@ st.sidebar.download_button(
 
 
 # ==============================================================================
-# 5. MAIN DASHBOARD CONTENT
+# UPGRADED STREAMLIT SIDEBAR & FILTERS
 # ==============================================================================
-st.title("📊 Market Intelligence Dashboard")
-st.markdown("Real-time price monitoring across competitors and client data.")
+st.sidebar.markdown("---")
+st.sidebar.subheader("Advanced Filters")
 
-client_name = "Our Client"
-client_data = filtered_df[filtered_df["Shop"] == client_name]
-comp_data = filtered_df[filtered_df["Shop"] != client_name]
+# 1. Category Filter (Assuming you have a 'Category' column, otherwise skips safely)
+if "Category" in df.columns:
+    categories = st.sidebar.multiselect(
+        "Select Categories", options=df["Category"].unique(), default=df["Category"].unique()
+    )
+    filtered_df = filtered_df[filtered_df["Category"].isin(categories)]
 
-# 1. TOP METRICS
-col1, col2, col3 = st.columns(3)
+# 2. Customizable Target Margin Slider
+target_margin = st.sidebar.slider("Target Profit Margin (%)", min_value=5, max_value=50, value=15)
 
-client_avg = (
-    client_data["Price (£)"].mean() if not client_data.empty else 0.0
+# Calculate Recommended Price based on competitor average and target margin
+filtered_df["Recommended Price (£)"] = filtered_df["Comp Avg (£)"] * (1 + (target_margin / 100))
+
+# ==============================================================================
+# UPGRADED MAIN DASHBOARD
+# ==============================================================================
+st.title("📊 Market Intelligence & Audit Dashboard")
+
+# 3. Executive Summary KPI Cards
+total_audited = len(filtered_df)
+overpriced_count = len(filtered_df[filtered_df["Difference (£)"] > 0])
+avg_diff = filtered_df["Difference (£)"].mean()
+
+kpi1, kpi2, kpi3 = st.columns(3)
+kpi1.metric("Total Products Audited", total_audited)
+kpi2.metric("Overpriced Items (Risk)", overpriced_count, f"{overpriced_count} items")
+kpi3.metric("Avg Price Difference", f"£{abs(avg_diff):.2f}", f"{'Above' if avg_diff > 0 else 'Below'} Market", delta_color="inverse")
+
+st.markdown("---")
+
+# 4. Price Trend Chart (Mock historical data for demonstration)
+st.subheader("📈 Market Price Trends (Last 4 Weeks)")
+mock_history = pd.DataFrame({
+    "Week": ["Week 1", "Week 2", "Week 3", "Current"],
+    "Client Avg Price": [35.50, 35.50, 35.50, filtered_df["Price (£)"].mean() if total_audited else 0],
+    "Market Avg Price": [32.10, 33.00, 31.50, filtered_df["Comp Avg (£)"].mean() if total_audited else 0]
+}).set_index("Week")
+st.line_chart(mock_history)
+
+# 5. Data Table & CSV Export
+st.subheader("📋 Detailed Product Registry")
+st.dataframe(filtered_df[["Product", "Price (£)", "Comp Avg (£)", "Difference (£)", "Recommended Price (£)"]], use_container_width=True)
+
+csv_data = filtered_df.to_csv(index=False).encode('utf-8')
+st.download_button(
+    label="📥 Download Raw Data (CSV)",
+    data=csv_data,
+    file_name="market_audit_raw.csv",
+    mime="text/csv"
 )
-comp_avg = comp_data["Price (£)"].mean() if not comp_data.empty else 0.0
-diff = client_avg - comp_avg
-
-col1.metric("Client Avg Price", f"£{client_avg:.2f}")
-col2.metric("Market Benchmark Avg", f"£{comp_avg:.2f}")
-
-delta_val = f"+{diff:.2f}" if diff > 0 else f"{diff:.2f}"
-
-col3.metric(
-    "Price Variance",
-    f"£{abs(diff):.2f}",
-    delta=delta_val,
-    delta_color="inverse",
-)
-
-# ==============================================================================
-# 2. DYNAMIC INSIGHTS CARDS (NEW)
-# ==============================================================================
-st.subheader("💡 Automated Market Insights")
-
-if not client_data.empty and not comp_data.empty:
-  # Compute product-level differences
-  comp_avg_per_item = (
-      comp_data.groupby("Product")["Price (£)"]
-      .mean()
-      .reset_index()
-      .rename(columns={"Price (£)": "Comp Avg (£)"})
-  )
-  merged_insights = pd.merge(
-      client_data, comp_avg_per_item, on="Product", how="inner"
-  )
-
-  if merged_insights.empty:
-    merged_insights = client_data.copy()
-    merged_insights["Comp Avg (£)"] = comp_avg
-
-  merged_insights["Difference (£)"] = (
-          merged_insights["Price (£)"] - merged_insights["Comp Avg (£)"]
-  )
-  overpriced_items = merged_insights[merged_insights["Difference (£)"] > 0]
-  underpriced_items = merged_insights[merged_insights["Difference (£)"] < 0]
-
-  ins_col1, ins_col2 = st.columns(2)
-
-  with ins_col1:
-    if diff > 0:
-      st.info(
-          f"**Market Positioning:** Client products average **£{abs(diff):.2f}"
-          " HIGHER** than the benchmark."
-      )
-    else:
-      st.info(
-          f"**Market Positioning:** Client products average **£{abs(diff):.2f}"
-          " LOWER** than the benchmark."
-      )
-
-  with ins_col2:
-    if len(overpriced_items) > 0:
-      st.warning(
-          f"**Key Risk:** {len(overpriced_items)} product(s) are priced above"
-          " market benchmark."
-      )
-    if len(underpriced_items) > 0:
-      st.success(
-          f"**Growth Opportunity:** {len(underpriced_items)} product(s) sit"
-          " below benchmark—room to optimize margins."
-      )
-else:
-  st.warning(
-      "Select both **Our Client** and at least one competitor store in the"
-      " sidebar to view market insights."
-  )
-
-st.divider()
-
-# ==============================================================================
-# MAIN SECTION: ON-DEMAND EMAIL REPORTING
-# ==============================================================================
-st.divider()
-st.subheader("📩 Distribute Market Intelligence Report")
-st.markdown(
-    "Send an automated email breakdown of current price variances and key risks"
-    " directly to stakeholders."
-)
-
-# Create a clean side-by-side layout for input and action button
-email_col1, email_col2 = st.columns([3, 1])
-
-with email_col1:
-  recipient_email = st.text_input(
-      "Recipient Email Address",
-      value="client@example.com",
-      placeholder="Enter client email address...",
-  )
-
-with email_col2:
-  # Vertically space the button to align with the text input field
-  st.write("")
-  st.write("")
-if st.button("📧 Send Email Report", use_container_width=True):
-  overpriced = merged_insights[merged_insights["Difference (£)"] > 0]
-  if not overpriced.empty:
-    email_sent = send_price_alert(overpriced, recipient_email)
-    if email_sent:
-      st.success(
-          f"Audit report successfully delivered to **{recipient_email}**!"
-      )
-  else:
-    st.info("No overpriced items detected. Client pricing is competitive!")
-
-# 3. VISUAL CHART & DATA TABLE
-left_col, right_col = st.columns([1, 1])
-
-with left_col:
-  st.subheader("Price Distribution by Store")
-  fig, ax = plt.subplots(figsize=(7, 4))
-  shop_averages = filtered_df.groupby("Shop")["Price (£)"].mean()
-
-  colors = [
-      "#1E3A8A" if s == client_name else "#64748B" for s in shop_averages.index
-  ]
-  ax.bar(shop_averages.index, shop_averages.values, color=colors)
-  ax.set_ylabel("Average Price (£)")
-  ax.spines["top"].set_visible(False)
-  ax.spines["right"].set_visible(False)
-  plt.xticks(rotation=20, ha="right")
-  st.pyplot(fig)
-
-with right_col:
-  st.subheader("Scraped Product Registry")
-  st.dataframe(
-      filtered_df,
-      column_config={
-          "Price (£)": st.column_config.NumberColumn(format="£%.2f")
-      },
-      use_container_width=True,
-      hide_index=True,
-  )
