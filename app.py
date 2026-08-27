@@ -90,7 +90,7 @@ def generate_pdf_bytes(audit_df):
     pdf.add_page()
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 10, "No audit data available for PDF generation.", ln=True)
-    return pdf.output(dest="S")
+    return bytes(pdf.output())  # <--- FIXED HERE
 
   comp_market_avg = audit_df["Comp Avg (£)"].mean()
   client_market_avg = audit_df["Client Price (£)"].mean()
@@ -208,7 +208,6 @@ def generate_pdf_bytes(audit_df):
         str(row["Product"]).encode("latin-1", "replace").decode("latin-1")[:38]
     )
 
-    # Light Red for overpriced, Light Green for underpriced
     if diff_val > 0:
       pdf.set_fill_color(254, 226, 226)
     elif diff_val < 0:
@@ -234,7 +233,7 @@ def generate_pdf_bytes(audit_df):
   if os.path.exists(temp_img_path):
     os.remove(temp_img_path)
 
-  return pdf.output(dest="S")
+  return bytes(pdf.output())  
 
 
 # ==============================================================================
