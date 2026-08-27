@@ -336,21 +336,29 @@ if "Category" in df.columns:
     )
     filtered_df = filtered_df[filtered_df["Category"].isin(categories)]
 
-# 2. Customizable Target Margin Slider
+# 1. Target Profit Margin Slider
 target_margin = st.sidebar.slider("Target Profit Margin (%)", min_value=5, max_value=50, value=15)
 
-# Calculate Recommended Price based on competitor average and target margin
-filtered_df["Recommended Price (£)"] = filtered_df["Comp Avg (£)"] * (1 + (target_margin / 100))
+# 2. Automatically find your market/competitor column
+possible_comp_cols = ["Comp Avg (£)", "Market Avg (£)", "Competitor Price (£)", "Benchmark (£)", "Market Price (£)"]
+comp_col = next((col for col in possible_comp_cols if col in filtered_df.columns), None)
+
+# 3. Calculate Recommended Price safely
+if comp_col:
+    filtered_df["Recommended Price (£)"] = filtered_df[comp_col] * (1 + (target_margin / 100))
+else:
+    # Fallback to base price if no competitor column is detected
+    filtered_df["Recommended Price (£)"] = filtered_df["Price (£)"] * (1 + (target_margin / 100))
 
 # ==============================================================================
-# UPGRADED MAIN DASHBOARD
+# MAIN DASHBOARD METRICS & TABLE
 # ==============================================================================
 st.title("📊 Market Intelligence & Audit Dashboard")
 
-# 3. Executive Summary KPI Cards
+# KPI Cards
 total_audited = len(filtered_df)
-overpriced_count = len(filtered_df[filtered_df["Difference (£)"] > 0])
-avg_diff = filtered_df["Difference (£)"].mean()
+overpriced_count = len(filtered_df[filtered_df["Difference (£)"] > 0]) if "Difference (£)" in filtered_df.columns else 0
+avg_diff = filtered_df["Difference (£)"].mean() if "Difference (£)" in filtered_df.columns else 0.0
 
 kpi1, kpi2, kpi3 = st.columns(3)
 kpi1.metric("Total Products Audited", total_audited)
@@ -359,18 +367,12 @@ kpi3.metric("Avg Price Difference", f"£{abs(avg_diff):.2f}", f"{'Above' if avg_
 
 st.markdown("---")
 
-# 4. Price Trend Chart (Mock historical data for demonstration)
-st.subheader("📈 Market Price Trends (Last 4 Weeks)")
-mock_history = pd.DataFrame({
-    "Week": ["Week 1", "Week 2", "Week 3", "Current"],
-    "Client Avg Price": [35.50, 35.50, 35.50, filtered_df["Price (£)"].mean() if total_audited else 0],
-    "Market Avg Price": [32.10, 33.00, 31.50, filtered_df["Comp Avg (£)"].mean() if total_audited else 0]
-}).set_index("Week")
-st.line_chart(mock_history)
-
-# 5. Data Table & CSV Export
+# Data Table & CSV Export
 st.subheader("📋 Detailed Product Registry")
-st.dataframe(filtered_df[["Product", "Price (£)", "Comp Avg (£)", "Difference (£)", "Recommended Price (£)"]], use_container_width=True)
+
+# Dynamically build display columns to avoid KeyErrors
+display_cols = [col for col in ["Product", "Price (£)", comp_col, "Difference (£)", "Recommended Price (£)"] if col and col in filtered_df.columns]
+st.dataframe(filtered_df[display_cols], use_container_width=True)
 
 csv_data = filtered_df.to_csv(index=False).encode('utf-8')
 st.download_button(
