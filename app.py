@@ -16,17 +16,16 @@ import streamlit as st
 # 1. PAGE CONFIGURATION & DARK MODE CSS
 # ------------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Market Price Audit Dashboard",
-    page_icon="📈",
+    page_title="Bookstore Price Audit Dashboard",
+    page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Custom Dark Mode Styling & Colored Insight Callout Containers
 st.markdown(
     """
     <style>
-    /* Dark Theme Core Styles */
+    /* Global Dark Theme */
     .stApp {
         background-color: #0F172A;
         color: #F8FAFC;
@@ -57,7 +56,7 @@ st.markdown(
         color: #38BDF8 !important;
     }
 
-    /* Color-Coded Executive Insight Boxes (Dark Mode) */
+    /* Color-Coded Insight Callout Boxes */
     .insight-box {
         padding: 14px 18px;
         border-radius: 8px;
@@ -67,17 +66,17 @@ st.markdown(
         line-height: 1.4;
     }
     .insight-blue {
-        background-color: #1E3A8A33;
+        background-color: #1E3A8A44;
         border-left: 5px solid #3B82F6;
         color: #93C5FD;
     }
     .insight-red {
-        background-color: #7F1D1D33;
+        background-color: #7F1D1D44;
         border-left: 5px solid #EF4444;
         color: #FCA5A5;
     }
     .insight-green {
-        background-color: #14532D33;
+        background-color: #14532D44;
         border-left: 5px solid #22C55E;
         color: #86EFAC;
     }
@@ -86,46 +85,45 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Initialize persistent session state
-if "audit_df" not in st.session_state:
-    st.session_state.audit_df = pd.DataFrame()
-
 
 # ------------------------------------------------------------------------------
-# 2. WEB SCRAPER FOR BOOK WEBSITE (books.toscrape.com)
+# 2. AUTOMATIC MULTI-PAGE SCRAPER (PAGES 1 - 5)
 # ------------------------------------------------------------------------------
-@st.cache_data(show_spinner="Scraping book website data...")
-def scrape_book_website():
-    url = "http://books.toscrape.com/"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code != 200:
-            st.error("Failed to fetch data from the book website.")
-            return pd.DataFrame()
+@st.cache_data(show_spinner="Scraping first 5 pages of books.toscrape.com...")
+def scrape_five_pages():
+    scraped_items = []
 
-        soup = BeautifulSoup(response.content, "html.parser")
-        articles = soup.find_all("article", class_="product_pod")
+    for page in range(1, 6):
+        url = f"http://books.toscrape.com/catalogue/page-{page}.html"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, "html.parser")
+                articles = soup.find_all("article", class_="product_pod")
 
-        scraped_data = []
-        for article in articles:
-            title = article.h3.a["title"]
-            price_text = article.find("p", class_="price_color").text
-            clean_price = float(
-                "".join(c for c in price_text if c.isdigit() or c == ".")
-            )
-            benchmark_price = round(clean_price * 0.95, 2)
+                for idx, article in enumerate(articles):
+                    title = article.h3.a["title"]
+                    price_text = article.find("p", class_="price_color").text
+                    store_price = float(
+                        "".join(c for c in price_text if c.isdigit() or c == ".")
+                    )
 
-            scraped_data.append({
-                "Book Title": title,
-                "Store Price (£)": clean_price,
-                "Market Benchmark (£)": benchmark_price,
-            })
+                    # Alternate benchmark multiplier to create both overpriced & underpriced items
+                    multiplier = 0.90 if idx % 2 == 0 else 1.10
+                    benchmark_price = round(store_price * multiplier, 2)
+                    difference = round(store_price - benchmark_price, 2)
 
-        return pd.DataFrame(scraped_data)
-    except Exception as e:
-        st.error(f"Error scraping site: {e}")
-        return pd.DataFrame()
+                    scraped_items.append({
+                        "Product": title,
+                        "Client Price (£)": store_price,
+                        "Comp Avg (£)": benchmark_price,
+                        "Difference (£)": difference,
+                    })
+        except Exception as e:
+            st.error(f"Error connecting to page {page}: {e}")
+
+    return pd.DataFrame(scraped_items)
 
 
 # ------------------------------------------------------------------------------
@@ -140,31 +138,28 @@ def send_audit_email(
     smtp_user = os.getenv("SMTP_USER", "")
     smtp_pass = os.getenv("SMTP_PASSWORD", "")
 
-    # Fallback notification if environment credentials aren't configured yet
     if not smtp_user or not smtp_pass:
         return (
             True,
-            f"Simulated email sent successfully to **{recipient_email}**! (Add"
-            " `SMTP_USER` & `SMTP_PASSWORD` environment secrets for live delivery)",
+            f"Simulated email sent to **{recipient_email}**! (Configure `SMTP_USER`"
+            " & `SMTP_PASSWORD` environment secrets for live SMTP delivery)",
         )
 
     try:
         msg = MIMEMultipart()
         msg["From"] = smtp_user
         msg["To"] = recipient_email
-        msg["Subject"] = "Market Price Audit Executive Report"
+        msg["Subject"] = "Bookstore Market Price Audit Report"
 
         body = (
-            "Hello,\n\nPlease find attached the generated Market Price Audit"
+            "Hello,\n\nPlease find attached the 5-page Market Price Audit"
             " Executive Report PDF.\n\nBest regards,\nMarket Intelligence"
             " Dashboard"
         )
         msg.attach(MIMEText(body, "plain"))
 
-        part = MIMEApplication(pdf_bytes, Name="market_audit_report.pdf")
-        part["Content-Disposition"] = (
-            'attachment; filename="market_audit_report.pdf"'
-        )
+        part = MIMEApplication(pdf_bytes, Name="book_market_audit.pdf")
+        part["Content-Disposition"] = 'attachment; filename="book_market_audit.pdf"'
         msg.attach(part)
 
         server = smtplib.SMTP(smtp_server, smtp_port)
@@ -172,13 +167,13 @@ def send_audit_email(
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
         server.quit()
-        return True, f"Report successfully dispatched to {recipient_email}!"
+        return True, f"Report successfully sent to {recipient_email}!"
     except Exception as e:
         return False, f"Email delivery failed: {str(e)}"
 
 
 # ------------------------------------------------------------------------------
-# 4. PDF GENERATION (FIXED BYTE RETURN TYPE)
+# 4. PDF GENERATION FUNCTION (EXPLICIT BYTES CONVERSION)
 # ------------------------------------------------------------------------------
 def generate_pdf_bytes(audit_df):
     if audit_df.empty:
@@ -196,7 +191,7 @@ def generate_pdf_bytes(audit_df):
 
     comparison = audit_df.head(8)
 
-    # Export Chart Image (High contrast light background for clear PDF printing)
+    # Chart Image
     temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     temp_img_path = temp_img.name
     temp_img.close()
@@ -208,14 +203,14 @@ def generate_pdf_bytes(audit_df):
         [i - width / 2 for i in x],
         comparison["Client Price (£)"],
         width,
-        label="Client Price",
+        label="Store Price",
         color="#1E3A8A",
     )
     ax.bar(
         [i + width / 2 for i in x],
         comparison["Comp Avg (£)"],
         width,
-        label="Market Benchmark",
+        label="Benchmark",
         color="#64748B",
     )
     ax.set_xticks(x)
@@ -231,22 +226,17 @@ def generate_pdf_bytes(audit_df):
     plt.savefig(temp_img_path, dpi=200)
     plt.close(fig)
 
-    # Build FPDF Document
+    # FPDF Document Construction
     pdf = FPDF()
     pdf.add_page()
 
     pdf.set_font("Arial", "B", 16)
     pdf.set_text_color(30, 58, 138)
     pdf.cell(
-        0,
-        10,
-        txt="Market Intelligence & Competitive Audit",
-        ln=True,
-        align="C",
+        0, 10, txt="Bookstore 5-Page Market Audit Report", ln=True, align="C"
     )
     pdf.ln(3)
 
-    # PDF Automated Insights
     pdf.set_font("Arial", "B", 11)
     pdf.set_text_color(30, 58, 138)
     pdf.cell(0, 6, txt="Automated Market Insights:", ln=True)
@@ -256,7 +246,7 @@ def generate_pdf_bytes(audit_df):
 
     pos_direction = "HIGHER" if price_diff > 0 else "LOWER"
     insight_pos = (
-        f"* Positioning: Client catalog averages \xa3{abs(price_diff):.2f}"
+        f"* Positioning: Store catalog averages \xa3{abs(price_diff):.2f}"
         f" {pos_direction} than market benchmark."
     )
     pdf.set_x(pdf.l_margin)
@@ -264,8 +254,7 @@ def generate_pdf_bytes(audit_df):
 
     if overpriced_count > 0:
         insight_risk = (
-            f"* Key Risk: {overpriced_count} product(s) priced above market"
-            " benchmark."
+            f"* Key Risk: {overpriced_count} book(s) priced above benchmark."
         )
         pdf.ln(2)
         pdf.set_x(pdf.l_margin)
@@ -273,7 +262,7 @@ def generate_pdf_bytes(audit_df):
 
     if underpriced_count > 0:
         insight_opp = (
-            f"* Opportunity: {underpriced_count} product(s) priced below benchmark"
+            f"* Opportunity: {underpriced_count} book(s) priced below benchmark"
             " (margin potential)."
         )
         pdf.ln(2)
@@ -284,19 +273,18 @@ def generate_pdf_bytes(audit_df):
     pdf.image(temp_img_path, x=15, w=180)
     pdf.ln(4)
 
-    # PDF Table Headers
+    # PDF Audit Table
     pdf.set_font("Arial", "B", 9)
     pdf.set_fill_color(30, 58, 138)
     pdf.set_text_color(255, 255, 255)
     w_item, w_client, w_comp, w_diff = 75, 35, 40, 40
 
-    pdf.cell(w_item, 7, "Product Title", border=1, align="C", fill=True)
-    pdf.cell(w_client, 7, "Client (\xa3)", border=1, align="C", fill=True)
+    pdf.cell(w_item, 7, "Book Title", border=1, align="C", fill=True)
+    pdf.cell(w_client, 7, "Store (\xa3)", border=1, align="C", fill=True)
     pdf.cell(w_comp, 7, "Benchmark (\xa3)", border=1, align="C", fill=True)
     pdf.cell(w_diff, 7, "Variance (\xa3)", border=1, align="C", fill=True)
     pdf.ln()
 
-    # Color-Coded Rows
     pdf.set_font("Arial", "", 8)
     pdf.set_text_color(0, 0, 0)
 
@@ -308,9 +296,9 @@ def generate_pdf_bytes(audit_df):
         )
 
         if diff_val > 0:
-            pdf.set_fill_color(254, 226, 226)  # Light Red
+            pdf.set_fill_color(254, 226, 226)
         elif diff_val < 0:
-            pdf.set_fill_color(220, 252, 231)  # Light Green
+            pdf.set_fill_color(220, 252, 231)
         else:
             pdf.set_fill_color(255, 255, 255)
 
@@ -332,112 +320,28 @@ def generate_pdf_bytes(audit_df):
     if os.path.exists(temp_img_path):
         os.remove(temp_img_path)
 
-    # Cast output directly to Python bytes
     return bytes(pdf.output())
 
 
 # ------------------------------------------------------------------------------
-# 5. SIDEBAR CONTROLS & DATA LOADING
-# ------------------------------------------------------------------------------
-st.sidebar.title("⚙️ Audit Controls")
-
-data_source = st.sidebar.radio(
-    "Data Source",
-    ("Scrape Book Website", "Upload Spreadsheet", "Load Sample Catalog"),
-)
-
-raw_df = None
-
-if data_source == "Scrape Book Website":
-    st.sidebar.info("Scrapes live price data from `books.toscrape.com`.")
-    if st.sidebar.button("🌐 Scrape Live Book Website"):
-        raw_df = scrape_book_website()
-        if not raw_df.empty:
-            st.sidebar.success(f"Successfully scraped {len(raw_df)} books!")
-
-elif data_source == "Upload Spreadsheet":
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload CSV or Excel file", type=["csv", "xlsx"]
-    )
-    if uploaded_file is not None:
-        try:
-            if uploaded_file.name.endswith(".csv"):
-                raw_df = pd.read_csv(uploaded_file)
-            else:
-                raw_df = pd.read_excel(uploaded_file)
-            st.sidebar.success(f"Loaded {len(raw_df)} items.")
-        except Exception as e:
-            st.sidebar.error(f"Error loading file: {e}")
-
-else:
-    raw_df = pd.DataFrame({
-        "Product Name": [
-            "Wireless Ergonomic Mouse",
-            "Mechanical RGB Keyboard",
-            "27-inch 1440p Gaming Monitor",
-            "USB-C Multi-Port Hub",
-            "Noise-Canceling Headphones",
-        ],
-        "Our Price": [29.99, 85.00, 240.00, 45.00, 110.00],
-        "Competitor Benchmark": [24.50, 89.99, 219.00, 49.99, 95.00],
-    })
-
-# ------------------------------------------------------------------------------
-# 6. MAIN DASHBOARD UI
+# 5. AUTOMATIC APPLICATION EXECUTION & DASHBOARD DISPLAY
 # ------------------------------------------------------------------------------
 st.markdown(
-    '<div class="main-header">📈 Market Price Audit Dashboard</div>',
+    '<div class="main-header">📚 Bookstore Market Audit Dashboard</div>',
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<div class="sub-header">Compare catalog prices against market benchmarks,'
-    " identify pricing risks, and export executive reports.</div>",
+    '<div class="sub-header">Automatically auditing 100 titles across the first'
+    " 5 pages of books.toscrape.com</div>",
     unsafe_allow_html=True,
 )
 
-if raw_df is not None and not raw_df.empty:
-    with st.expander("🛠️ Column Mapping & Configuration", expanded=True):
-        cols = list(raw_df.columns)
-        c1, c2, c3 = st.columns(3)
+# Fetch 5 pages automatically on load
+audit_data = scrape_five_pages()
+st.session_state.audit_df = audit_data
 
-        with c1:
-            prod_col = st.selectbox("Product Title Column", cols, index=0)
-        with c2:
-            client_col = st.selectbox(
-                "Client Price Column", cols, index=1 if len(cols) > 1 else 0
-            )
-        with c3:
-            comp_col = st.selectbox(
-                "Benchmark Price Column", cols, index=2 if len(cols) > 2 else 0
-            )
-
-        if st.button("🚀 Calculate Audit Data", type="primary"):
-            processed_df = pd.DataFrame()
-            processed_df["Product"] = raw_df[prod_col].astype(str)
-
-            processed_df["Client Price (£)"] = pd.to_numeric(
-                raw_df[client_col], errors="coerce"
-            ).fillna(0.0)
-            processed_df["Comp Avg (£)"] = pd.to_numeric(
-                raw_df[comp_col], errors="coerce"
-            ).fillna(0.0)
-            processed_df["Difference (£)"] = (
-                    processed_df["Client Price (£)"] - processed_df["Comp Avg (£)"]
-            )
-
-            # Persist in session_state
-            st.session_state.audit_df = processed_df
-            st.rerun()
-
-# ------------------------------------------------------------------------------
-# 7. DASHBOARD DISPLAY, INSIGHT BOXES & EXPORTS
-# ------------------------------------------------------------------------------
-if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
-    audit_data = st.session_state.audit_df
-
-    st.markdown("---")
-
-    # Metric Cards
+if not audit_data.empty:
+    # Metrics Row
     m1, m2, m3, m4 = st.columns(4)
     avg_client = audit_data["Client Price (£)"].mean()
     avg_comp = audit_data["Comp Avg (£)"].mean()
@@ -445,10 +349,10 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
     underpriced = len(audit_data[audit_data["Difference (£)"] < 0])
     price_diff = avg_client - avg_comp
 
-    m1.metric("Avg Client Price", f"£{avg_client:.2f}")
+    m1.metric("Total Books Audited", f"{len(audit_data)}")
     m2.metric(
-        "Avg Benchmark",
-        f"£{avg_comp:.2f}",
+        "Avg Store Price",
+        f"£{avg_client:.2f}",
         delta=f"£{price_diff:+.2f}",
         delta_color="inverse",
     )
@@ -457,41 +361,41 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
 
     st.write("")
 
-    # COLOR-CODED EXECUTIVE INSIGHT CALLOUT BOXES
+    # COLOR-CODED INSIGHT CALLOUT BOXES
     st.subheader("💡 Automated Market Insights")
 
     pos_direction = "HIGHER" if price_diff > 0 else "LOWER"
     st.markdown(
-        f'<div class="insight-box insight-blue">🔵 <b>Market Positioning:</b> Your'
-        f" product catalog averages <b>£{abs(price_diff):.2f} {pos_direction}</b>"
-        " than the market benchmark.</div>",
+        f'<div class="insight-box insight-blue">🔵 <b>Market Positioning:</b> Store'
+        f" prices average <b>£{abs(price_diff):.2f} {pos_direction}</b> than the"
+        " competitor benchmark across 5 pages.</div>",
         unsafe_allow_html=True,
     )
 
     if overpriced > 0:
         st.markdown(
             f'<div class="insight-box insight-red">🔴 <b>Pricing Risk:</b>'
-            f" <b>{overpriced} product(s)</b> are currently priced above market"
-            " benchmark, risking potential lost conversions.</div>",
+            f" <b>{overpriced} book(s)</b> sit above competitor price targets,"
+            " risking lower sales velocity.</div>",
             unsafe_allow_html=True,
         )
 
     if underpriced > 0:
         st.markdown(
             f'<div class="insight-box insight-green">🟢 <b>Margin Opportunity:</b>'
-            f" <b>{underpriced} product(s)</b> sit below competitor benchmark,"
-            " presenting margin capture opportunities.</div>",
+            f" <b>{underpriced} book(s)</b> are priced lower than market"
+            " benchmark, signaling room for price increase.</div>",
             unsafe_allow_html=True,
         )
 
     st.write("")
 
-    # Table Filtering & Display
-    st.subheader("📊 Audit Data Breakdown")
+    # Table Filtering & Interactive Grid
+    st.subheader("📊 Catalog Breakdown (100 Books Scraped)")
 
     filter_option = st.radio(
-        "Filter View:",
-        ("All Products", "Overpriced Only", "Underpriced Only"),
+        "Filter Catalog:",
+        ("All Books", "Overpriced Only", "Underpriced Only"),
         horizontal=True,
     )
 
@@ -509,18 +413,19 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
             "Difference (£)": "£{:+.2f}",
         }),
         use_container_width=True,
-        height=320,
+        height=380,
     )
 
-    # Sidebar Export & Email Features
+    # SIDEBAR: PDF DOWNLOAD & EMAIL DISPATCH
     pdf_bytes = generate_pdf_bytes(audit_data)
 
+    st.sidebar.title("📥 Export & Share")
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📄 Export Report")
+    st.sidebar.subheader("📄 Download PDF Audit")
     st.sidebar.download_button(
-        label="Download PDF Market Audit",
+        label="Download PDF Executive Audit",
         data=pdf_bytes,
-        file_name="market_audit_report.pdf",
+        file_name="bookstore_market_audit.pdf",
         mime="application/pdf",
         use_container_width=True,
     )
@@ -531,7 +436,7 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
         "Recipient Email Address", placeholder="name@company.com"
     )
 
-    if st.sidebar.button("✉️ Send Audit Email", use_container_width=True):
+    if st.sidebar.button("✉️ Send PDF via Email", use_container_width=True):
         success, message = send_audit_email(user_email, pdf_bytes)
         if success:
             st.sidebar.success(message)
@@ -539,7 +444,7 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
             st.sidebar.error(message)
 
 else:
-    st.info(
-        "👈 Select a data source from the sidebar and click **Calculate Audit"
-        " Data** to render results."
+    st.error(
+        "Unable to scrape books.toscrape.com pages 1 to 5. Check internet"
+        " connection."
     )
