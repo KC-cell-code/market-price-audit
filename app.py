@@ -327,7 +327,7 @@ def generate_pdf_bytes(audit_df):
 # 5. AUTOMATIC APPLICATION EXECUTION & DASHBOARD DISPLAY
 # ------------------------------------------------------------------------------
 st.markdown(
-    '<div class="main-header">📚 Bookstore Market Audit Dashboard</div>',
+    '<div class="main-header">📊 Market Audit Dashboard</div>',
     unsafe_allow_html=True,
 )
 st.markdown(
@@ -349,7 +349,7 @@ if not audit_data.empty:
     underpriced = len(audit_data[audit_data["Difference (£)"] < 0])
     price_diff = avg_client - avg_comp
 
-    m1.metric("Total Books Audited", f"{len(audit_data)}")
+    m1.metric("Total Products Audited", f"{len(audit_data)}")
     m2.metric(
         "Avg Store Price",
         f"£{avg_client:.2f}",
@@ -375,7 +375,7 @@ if not audit_data.empty:
     if overpriced > 0:
         st.markdown(
             f'<div class="insight-box insight-red">🔴 <b>Pricing Risk:</b>'
-            f" <b>{overpriced} book(s)</b> sit above competitor price targets,"
+            f" <b>{overpriced} product(s)</b> sit above competitor price targets,"
             " risking lower sales velocity.</div>",
             unsafe_allow_html=True,
         )
@@ -383,7 +383,7 @@ if not audit_data.empty:
     if underpriced > 0:
         st.markdown(
             f'<div class="insight-box insight-green">🟢 <b>Margin Opportunity:</b>'
-            f" <b>{underpriced} book(s)</b> are priced lower than market"
+            f" <b>{underpriced} product(s)</b> are priced lower than market"
             " benchmark, signaling room for price increase.</div>",
             unsafe_allow_html=True,
         )
@@ -391,11 +391,11 @@ if not audit_data.empty:
     st.write("")
 
     # Table Filtering & Interactive Grid
-    st.subheader("📊 Catalog Breakdown (100 Books Scraped)")
+    st.subheader("📊 Catalog Breakdown (100 Items Scraped)")
 
     filter_option = st.radio(
         "Filter Catalog:",
-        ("All Books", "Overpriced Only", "Underpriced Only"),
+        ("All Products", "Overpriced Only", "Underpriced Only"),
         horizontal=True,
     )
 
@@ -425,7 +425,7 @@ if not audit_data.empty:
     st.sidebar.download_button(
         label="Download PDF Executive Audit",
         data=pdf_bytes,
-        file_name="bookstore_market_audit.pdf",
+        file_name="market_audit.pdf",
         mime="application/pdf",
         use_container_width=True,
     )
