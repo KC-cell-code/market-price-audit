@@ -14,7 +14,7 @@ st.set_page_config(
 
 # Initialize persistent session state for data storage across reruns
 if "audit_df" not in st.session_state:
-  st.session_state.audit_df = pd.DataFrame()
+  st.session_state.audit_df = audit_df
 
 
 # ==============================================================================
@@ -171,8 +171,8 @@ def generate_pdf_bytes(audit_df):
   if os.path.exists(temp_img_path):
     os.remove(temp_img_path)
 
-  # Cast output directly to Python bytes to avoid Streamlit download_button error
-  return bytes(pdf.output())
+    return bytes(pdf.output())
+
 
 
 # ==============================================================================
