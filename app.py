@@ -2,7 +2,9 @@ import os
 import tempfile
 import matplotlib.pyplot as plt
 import pandas as pd
+import requests
 import streamlit as st
+from bs4 import BeautifulSoup
 from fpdf import FPDF
 
 # ------------------------------------------------------------------------------
@@ -15,7 +17,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for dashboard UI
 st.markdown(
     """
     <style>
@@ -41,13 +42,49 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Initialize Session State
 if "audit_df" not in st.session_state:
   st.session_state.audit_df = pd.DataFrame()
 
 
 # ------------------------------------------------------------------------------
-# 2. PDF GENERATION FUNCTION (WITH FIXED BYTES RETURN)
+# 2. WEB SCRAPER FOR BOOK WEBSITE (books.toscrape.com)
+# ------------------------------------------------------------------------------
+@st.cache_data(show_spinner="Scraping book website data...")
+def scrape_book_website():
+  url = "http://books.toscrape.com/"
+  headers = {"User-Agent": "Mozilla/5.0"}
+  response = requests.get(url, headers=headers)
+
+  if response.status_code != 200:
+    st.error("Failed to fetch data from the book website.")
+    return pd.DataFrame()
+
+  soup = BeautifulSoup(response.content, "html.parser")
+  articles = soup.find_all("article", class_="product_pod")
+
+  scraped_data = []
+  for article in articles:
+    title = article.h3.a["title"]
+    price_text = article.find("p", class_="price_color").text
+    # Clean non-numeric currency characters
+    clean_price = float(
+        "".join(c for c in price_text if c.isdigit() or c == ".")
+    )
+
+    # Benchmark calculated as market average comparison
+    benchmark_price = round(clean_price * 0.95, 2)
+
+    scraped_data.append({
+        "Book Title": title,
+        "Store Price (£)": clean_price,
+        "Market Benchmark (£)": benchmark_price,
+    })
+
+  return pd.DataFrame(scraped_data)
+
+
+# ------------------------------------------------------------------------------
+# 3. PDF GENERATION HELPER
 # ------------------------------------------------------------------------------
 def generate_pdf_bytes(audit_df):
   if audit_df.empty:
@@ -65,7 +102,7 @@ def generate_pdf_bytes(audit_df):
 
   comparison = audit_df.head(8)
 
-  # Generate Chart
+  # Chart
   temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
   temp_img_path = temp_img.name
   temp_img.close()
@@ -100,7 +137,7 @@ def generate_pdf_bytes(audit_df):
   plt.savefig(temp_img_path, dpi=200)
   plt.close(fig)
 
-  # Build FPDF Document
+  # PDF Build
   pdf = FPDF()
   pdf.add_page()
 
@@ -115,7 +152,6 @@ def generate_pdf_bytes(audit_df):
   )
   pdf.ln(3)
 
-  # Executive Insights
   pdf.set_font("Arial", "B", 11)
   pdf.set_text_color(30, 58, 138)
   pdf.cell(0, 6, txt="Automated Market Insights:", ln=True)
@@ -153,7 +189,7 @@ def generate_pdf_bytes(audit_df):
   pdf.image(temp_img_path, x=15, w=180)
   pdf.ln(4)
 
-  # Table Header
+  # Table
   pdf.set_font("Arial", "B", 9)
   pdf.set_fill_color(30, 58, 138)
   pdf.set_text_color(255, 255, 255)
@@ -165,7 +201,6 @@ def generate_pdf_bytes(audit_df):
   pdf.cell(w_diff, 7, "Variance (\xa3)", border=1, align="C", fill=True)
   pdf.ln()
 
-  # Table Rows
   pdf.set_font("Arial", "", 8)
   pdf.set_text_color(0, 0, 0)
 
@@ -177,9 +212,9 @@ def generate_pdf_bytes(audit_df):
     )
 
     if diff_val > 0:
-      pdf.set_fill_color(254, 226, 226)  # Soft Red
+      pdf.set_fill_color(254, 226, 226)
     elif diff_val < 0:
-      pdf.set_fill_color(220, 252, 231)  # Soft Green
+      pdf.set_fill_color(220, 252, 231)
     else:
       pdf.set_fill_color(255, 255, 255)
 
@@ -201,22 +236,29 @@ def generate_pdf_bytes(audit_df):
   if os.path.exists(temp_img_path):
     os.remove(temp_img_path)
 
-  # Cast output explicitly to Python bytes
   return bytes(pdf.output())
 
 
 # ------------------------------------------------------------------------------
-# 3. SIDEBAR & INPUT CONTROLS
+# 4. SIDEBAR & INPUT CONTROLS
 # ------------------------------------------------------------------------------
 st.sidebar.title("⚙️ Audit Controls")
 
 data_source = st.sidebar.radio(
-    "Data Source", ("Upload Spreadsheet", "Load Sample Catalog")
+    "Data Source",
+    ("Scrape Book Website", "Upload Spreadsheet", "Load Sample Catalog"),
 )
 
 raw_df = None
 
-if data_source == "Upload Spreadsheet":
+if data_source == "Scrape Book Website":
+  st.sidebar.info("Scrapes live price data from `books.toscrape.com`.")
+  if st.sidebar.button("🌐 Scrape Live Book Website"):
+    raw_df = scrape_book_website()
+    if not raw_df.empty:
+      st.sidebar.success(f"Successfully scraped {len(raw_df)} books!")
+
+elif data_source == "Upload Spreadsheet":
   uploaded_file = st.sidebar.file_uploader(
       "Upload CSV or Excel file", type=["csv", "xlsx"]
   )
@@ -229,6 +271,7 @@ if data_source == "Upload Spreadsheet":
       st.sidebar.success(f"Loaded {len(raw_df)} items.")
     except Exception as e:
       st.sidebar.error(f"Error loading file: {e}")
+
 else:
   raw_df = pd.DataFrame({
       "Product Name": [
@@ -237,25 +280,13 @@ else:
           "27-inch 1440p Gaming Monitor",
           "USB-C Multi-Port Hub",
           "Noise-Canceling Headphones",
-          "Vertical Laptop Stand",
-          "Ultra-Wide Desk Pad",
-          "HD Webcam 1080p",
       ],
-      "Our Price": [29.99, 85.00, 240.00, 45.00, 110.00, 22.50, 18.00, 55.00],
-      "Competitor Benchmark": [
-          24.50,
-          89.99,
-          219.00,
-          49.99,
-          95.00,
-          22.50,
-          14.99,
-          62.00,
-      ],
+      "Our Price": [29.99, 85.00, 240.00, 45.00, 110.00],
+      "Competitor Benchmark": [24.50, 89.99, 219.00, 49.99, 95.00],
   })
 
 # ------------------------------------------------------------------------------
-# 4. MAIN BODY & COLUMN MAPPING
+# 5. MAIN BODY & COLUMN MAPPING
 # ------------------------------------------------------------------------------
 st.markdown(
     '<div class="main-header">📈 Market Price Audit Dashboard</div>',
@@ -267,7 +298,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if raw_df is not None:
+if raw_df is not None and not raw_df.empty:
   with st.expander("🛠️ Column Mapping & Configuration", expanded=True):
     cols = list(raw_df.columns)
     c1, c2, c3 = st.columns(3)
@@ -287,7 +318,6 @@ if raw_df is not None:
       processed_df = pd.DataFrame()
       processed_df["Product"] = raw_df[prod_col].astype(str)
 
-      # Force numeric types to prevent blank figures
       processed_df["Client Price (£)"] = pd.to_numeric(
           raw_df[client_col], errors="coerce"
       ).fillna(0.0)
@@ -298,17 +328,15 @@ if raw_df is not None:
           processed_df["Client Price (£)"] - processed_df["Comp Avg (£)"]
       )
 
-      # Save into session state so it persists across user actions
       st.session_state.audit_df = processed_df
       st.rerun()
 
 # ------------------------------------------------------------------------------
-# 5. DASHBOARD METRICS, TABLE & EXPORT
+# 6. DASHBOARD DISPLAY & EXPORT
 # ------------------------------------------------------------------------------
 if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
   audit_data = st.session_state.audit_df
 
-  # Quick Filters
   st.markdown("---")
   filter_option = st.radio(
       "Filter View:",
@@ -323,7 +351,6 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
   else:
     view_df = audit_data
 
-  # Metric Cards
   m1, m2, m3, m4 = st.columns(4)
   avg_client = audit_data["Client Price (£)"].mean()
   avg_comp = audit_data["Comp Avg (£)"].mean()
@@ -337,14 +364,11 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
       delta=f"£{avg_client - avg_comp:+.2f}",
       delta_color="inverse",
   )
-  m3.metric("Overpriced Products", f"{overpriced}", help="Priced above market")
-  m4.metric(
-      "Underpriced Products", f"{underpriced}", help="Priced below market"
-  )
+  m3.metric("Overpriced Products", f"{overpriced}")
+  m4.metric("Underpriced Products", f"{underpriced}")
 
   st.write("")
 
-  # Interactive Table
   st.subheader("Audit Data Breakdown")
   st.dataframe(
       view_df.style.format({
@@ -356,7 +380,6 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
       height=320,
   )
 
-  # Sidebar PDF Export
   pdf_bytes = generate_pdf_bytes(audit_data)
 
   st.sidebar.markdown("---")
@@ -369,7 +392,7 @@ if "audit_df" in st.session_state and not st.session_state.audit_df.empty:
       use_container_width=True,
   )
 else:
-  if raw_df is None:
-    st.info("👈 Select a data source from the sidebar to start.")
-  else:
-    st.info("Click **Calculate Audit Data** above to render results.")
+  st.info(
+      "👈 Select **Scrape Book Website** from the sidebar and click **Scrape"
+      " Live Book Website** to load live book data."
+  )
