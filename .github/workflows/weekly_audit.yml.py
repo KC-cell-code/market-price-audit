@@ -1,0 +1,38 @@
+name: Run Weekly Email Script
+
+on:
+  schedule:
+    # Runs every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch: # Enables manual triggers via the GitHub Actions UI
+
+jobs:
+  run-report-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Set up Python environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install required Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install gspread google-auth reportlab pandas
+
+      - name: Recreate google_credentials.json from secret
+        env:
+          GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
+        run: |
+          echo "$GOOGLE_SHEETS_CREDS" > google_credentials.json
+
+      - name: Execute weekly report script
+        env:
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+        run: |
+          python weekly_report.py
