@@ -1,3 +1,4 @@
+import json
 import os
 import smtplib
 import tempfile
@@ -7,6 +8,8 @@ from email.mime.text import MIMEText
 
 from bs4 import BeautifulSoup
 from fpdf import FPDF
+import gspread
+from google.oauth2.service_account import Credentials
 import matplotlib.pyplot as plt
 import pandas as pd
 import requests
@@ -16,8 +19,8 @@ import streamlit as st
 # 1. PAGE CONFIGURATION & DARK MODE CSS
 # ------------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Bookstore Price Audit Dashboard",
-    page_icon="📚",
+    page_title="Market Price Audit Dashboard",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -87,9 +90,47 @@ st.markdown(
 
 
 # ------------------------------------------------------------------------------
-# 2. AUTOMATIC MULTI-PAGE SCRAPER (PAGES 1 - 5)
+# 2. GOOGLE SHEETS SUBSCRIPTION HELPERS
 # ------------------------------------------------------------------------------
-@st.cache_data(show_spinner="Scraping first 5 pages of books.toscrape.com...")
+def get_gsheets_client():
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds_raw = os.getenv("GOOGLE_SHEETS_CREDS")
+    if creds_raw:
+        creds_dict = json.loads(creds_raw)
+        creds = Credentials.from_service_account_info(
+            creds_dict, scopes=scopes
+        )
+    elif os.path.exists("google_credentials.json"):
+        creds = Credentials.from_service_account_file(
+            "google_credentials.json", scopes=scopes
+        )
+    else:
+        return None
+    return gspread.authorize(creds)
+
+
+def add_subscriber(email):
+    try:
+        client = get_gsheets_client()
+        if not client:
+            return False, "Database credentials (`GOOGLE_SHEETS_CREDS`) not configured."
+
+        sheet = client.open("Audit_Subscribers").sheet1
+        existing_emails = sheet.col_values(1)
+
+        if email in existing_emails:
+            return False, "This email is already subscribed to weekly reports."
+
+        sheet.append_row([email])
+        return True, f"Successfully subscribed **{email}** to weekly reports!"
+    except Exception as e:
+        return False, f"Failed to subscribe: {str(e)}"
+
+
+# ------------------------------------------------------------------------------
+# 3. AUTOMATIC MULTI-PAGE SCRAPER (PAGES 1 - 5)
+# ------------------------------------------------------------------------------
+@st.cache_data(show_spinner="Scraping target catalog pages...")
 def scrape_five_pages():
     scraped_items = []
 
@@ -109,7 +150,6 @@ def scrape_five_pages():
                         "".join(c for c in price_text if c.isdigit() or c == ".")
                     )
 
-                    # Alternate benchmark multiplier to create both overpriced & underpriced items
                     multiplier = 0.90 if idx % 2 == 0 else 1.10
                     benchmark_price = round(store_price * multiplier, 2)
                     difference = round(store_price - benchmark_price, 2)
@@ -127,10 +167,10 @@ def scrape_five_pages():
 
 
 # ------------------------------------------------------------------------------
-# 3. EMAIL DISPATCH HELPER
+# 4. EMAIL DISPATCH HELPER
 # ------------------------------------------------------------------------------
 def send_audit_email(
-        recipient_email, pdf_bytes, smtp_server="smtp.gmail.com", smtp_port=587
+    recipient_email, pdf_bytes, smtp_server="smtp.gmail.com", smtp_port=587
 ):
     if not recipient_email or "@" not in recipient_email:
         return False, "Please enter a valid recipient email address."
@@ -149,17 +189,17 @@ def send_audit_email(
         msg = MIMEMultipart()
         msg["From"] = smtp_user
         msg["To"] = recipient_email
-        msg["Subject"] = "Bookstore Market Price Audit Report"
+        msg["Subject"] = "Market Price Audit Executive Report"
 
         body = (
-            "Hello,\n\nPlease find attached the 5-page Market Price Audit"
+            "Hello,\n\nPlease find attached the Market Price Audit"
             " Executive Report PDF.\n\nBest regards,\nMarket Intelligence"
             " Dashboard"
         )
         msg.attach(MIMEText(body, "plain"))
 
-        part = MIMEApplication(pdf_bytes, Name="book_market_audit.pdf")
-        part["Content-Disposition"] = 'attachment; filename="book_market_audit.pdf"'
+        part = MIMEApplication(pdf_bytes, Name="market_audit.pdf")
+        part["Content-Disposition"] = 'attachment; filename="market_audit.pdf"'
         msg.attach(part)
 
         server = smtplib.SMTP(smtp_server, smtp_port)
@@ -173,7 +213,7 @@ def send_audit_email(
 
 
 # ------------------------------------------------------------------------------
-# 4. PDF GENERATION FUNCTION (EXPLICIT BYTES CONVERSION)
+# 5. PDF GENERATION FUNCTION (EXPLICIT BYTES CONVERSION)
 # ------------------------------------------------------------------------------
 def generate_pdf_bytes(audit_df):
     if audit_df.empty:
@@ -191,7 +231,6 @@ def generate_pdf_bytes(audit_df):
 
     comparison = audit_df.head(8)
 
-    # Chart Image
     temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     temp_img_path = temp_img.name
     temp_img.close()
@@ -226,14 +265,13 @@ def generate_pdf_bytes(audit_df):
     plt.savefig(temp_img_path, dpi=200)
     plt.close(fig)
 
-    # FPDF Document Construction
     pdf = FPDF()
     pdf.add_page()
 
     pdf.set_font("Arial", "B", 16)
     pdf.set_text_color(30, 58, 138)
     pdf.cell(
-        0, 10, txt="Bookstore 5-Page Market Audit Report", ln=True, align="C"
+        0, 10, txt="Market Audit Executive Report", ln=True, align="C"
     )
     pdf.ln(3)
 
@@ -254,7 +292,7 @@ def generate_pdf_bytes(audit_df):
 
     if overpriced_count > 0:
         insight_risk = (
-            f"* Key Risk: {overpriced_count} book(s) priced above benchmark."
+            f"* Key Risk: {overpriced_count} product(s) priced above benchmark."
         )
         pdf.ln(2)
         pdf.set_x(pdf.l_margin)
@@ -262,7 +300,7 @@ def generate_pdf_bytes(audit_df):
 
     if underpriced_count > 0:
         insight_opp = (
-            f"* Opportunity: {underpriced_count} book(s) priced below benchmark"
+            f"* Opportunity: {underpriced_count} product(s) priced below benchmark"
             " (margin potential)."
         )
         pdf.ln(2)
@@ -273,13 +311,12 @@ def generate_pdf_bytes(audit_df):
     pdf.image(temp_img_path, x=15, w=180)
     pdf.ln(4)
 
-    # PDF Audit Table
     pdf.set_font("Arial", "B", 9)
     pdf.set_fill_color(30, 58, 138)
     pdf.set_text_color(255, 255, 255)
     w_item, w_client, w_comp, w_diff = 75, 35, 40, 40
 
-    pdf.cell(w_item, 7, "Book Title", border=1, align="C", fill=True)
+    pdf.cell(w_item, 7, "Product Name", border=1, align="C", fill=True)
     pdf.cell(w_client, 7, "Store (\xa3)", border=1, align="C", fill=True)
     pdf.cell(w_comp, 7, "Benchmark (\xa3)", border=1, align="C", fill=True)
     pdf.cell(w_diff, 7, "Variance (\xa3)", border=1, align="C", fill=True)
@@ -324,24 +361,21 @@ def generate_pdf_bytes(audit_df):
 
 
 # ------------------------------------------------------------------------------
-# 5. AUTOMATIC APPLICATION EXECUTION & DASHBOARD DISPLAY
+# 6. APPLICATION EXECUTION & DASHBOARD DISPLAY
 # ------------------------------------------------------------------------------
 st.markdown(
     '<div class="main-header">📊 Market Audit Dashboard</div>',
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<div class="sub-header">Automatically auditing 100 titles across the first'
-    " 5 pages of books.toscrape.com</div>",
+    '<div class="sub-header">Automatically auditing catalog items across target pages</div>',
     unsafe_allow_html=True,
 )
 
-# Fetch 5 pages automatically on load
 audit_data = scrape_five_pages()
 st.session_state.audit_df = audit_data
 
 if not audit_data.empty:
-    # Metrics Row
     m1, m2, m3, m4 = st.columns(4)
     avg_client = audit_data["Client Price (£)"].mean()
     avg_comp = audit_data["Comp Avg (£)"].mean()
@@ -361,14 +395,13 @@ if not audit_data.empty:
 
     st.write("")
 
-    # COLOR-CODED INSIGHT CALLOUT BOXES
     st.subheader("💡 Automated Market Insights")
 
     pos_direction = "HIGHER" if price_diff > 0 else "LOWER"
     st.markdown(
         f'<div class="insight-box insight-blue">🔵 <b>Market Positioning:</b> Store'
         f" prices average <b>£{abs(price_diff):.2f} {pos_direction}</b> than the"
-        " competitor benchmark across 5 pages.</div>",
+        " competitor benchmark.</div>",
         unsafe_allow_html=True,
     )
 
@@ -390,8 +423,7 @@ if not audit_data.empty:
 
     st.write("")
 
-    # Table Filtering & Interactive Grid
-    st.subheader("📊 Catalog Breakdown (100 Items Scraped)")
+    st.subheader("📊 Catalog Breakdown")
 
     filter_option = st.radio(
         "Filter Catalog:",
@@ -416,7 +448,9 @@ if not audit_data.empty:
         height=380,
     )
 
-    # SIDEBAR: PDF DOWNLOAD & EMAIL DISPATCH
+    # --------------------------------------------------------------------------
+    # SIDEBAR CONTROLS
+    # --------------------------------------------------------------------------
     pdf_bytes = generate_pdf_bytes(audit_data)
 
     st.sidebar.title("📥 Export & Share")
@@ -431,20 +465,33 @@ if not audit_data.empty:
     )
 
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📧 Email Audit Report")
+    st.sidebar.subheader("📧 Instant Email Dispatch")
     user_email = st.sidebar.text_input(
-        "Recipient Email Address", placeholder="name@company.com"
+        "Recipient Email Address", placeholder="name@company.com", key="instant_email"
     )
 
-    if st.sidebar.button("✉️ Send PDF via Email", use_container_width=True):
+    if st.sidebar.button("✉️ Send PDF Now", use_container_width=True):
         success, message = send_audit_email(user_email, pdf_bytes)
         if success:
             st.sidebar.success(message)
         else:
             st.sidebar.error(message)
 
-else:
-    st.error(
-        "Unable to scrape books.toscrape.com pages 1 to 5. Check internet"
-        " connection."
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📅 Weekly Automated Subscription")
+    sub_email = st.sidebar.text_input(
+        "Subscribe to Weekly PDF Email", placeholder="client@company.com", key="sub_email"
     )
+
+    if st.sidebar.button("🔔 Subscribe to Weekly Report", use_container_width=True):
+        if "@" in sub_email:
+            success, msg = add_subscriber(sub_email.strip())
+            if success:
+                st.sidebar.success(msg)
+            else:
+                st.sidebar.warning(msg)
+        else:
+            st.sidebar.error("Please enter a valid email address.")
+
+else:
+    st.error("Unable to scrape target catalog pages. Check your internet connection.")
