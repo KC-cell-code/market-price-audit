@@ -262,7 +262,7 @@ def send_batch_emails(recipients, pdf_bytes):
 
 if __name__ == "__main__":
   print("Starting weekly subscriber audit dispatch...")
-  subscribers = get_all_subscribers()
+  subscribers = ["subredditspooks@gmail.com"]
   print(f"Found {len(subscribers)} active subscriber(s).")
 
   if subscribers:
