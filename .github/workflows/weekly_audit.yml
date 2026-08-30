@@ -2,7 +2,7 @@ name: Run Weekly Email Script
 
 'on':
   schedule:
-    - cron: '15 15 * * *'
+    - cron: '20 15 * * *'
   workflow_dispatch:
 
 jobs:
