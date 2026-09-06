@@ -1,39 +1,29 @@
-name: Run Weekly Email Script
+name: Weekly Audit Report
 
-'on':
-  schedule:
-    - cron: '20 15 * * *'
+on:
   workflow_dispatch:
 
 jobs:
   run-report-job:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python environment
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Install required Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install gspread google-auth reportlab pandas beautifulsoup4 requests fpdf2 matplotlib
-
-      - name: Recreate google_credentials.json from secret
-        env:
-          GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
-        run: |
-          echo "$GOOGLE_SHEETS_CREDS" > google_credentials.json
+          pip install gspread google-auth pandas matplotlib requests fpdf2
 
       - name: Run weekly report
         env:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
           STREAMLIT_URL: ${{ secrets.STREAMLIT_URL }}
         run: python weekly_report.py
