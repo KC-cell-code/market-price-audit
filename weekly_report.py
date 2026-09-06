@@ -231,20 +231,31 @@ def send_batch_emails(recipients, pdf_bytes):
         )
         return
 
-    # Connect securely via Port 465 SSL with a 30s timeout
+    # Replace with your actual Streamlit app URL or set STREAMLIT_URL in GitHub Secrets
+    streamlit_url = os.getenv(
+        "STREAMLIT_URL", "https://your-app-name.streamlit.app"
+    )
+
+    # Customize your sender display name (e.g., "Market Price Audit" or your name)
+    sender_display_name = "Market Price Audit"
+
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
         server.login(SMTP_USER, SMTP_PASS)
 
         for recipient in recipients:
             msg = MIMEMultipart()
-            msg["From"] = SMTP_USER
+            msg["From"] = f"{sender_display_name} <{SMTP_USER}>"
             msg["To"] = recipient
             msg["Subject"] = "Weekly Market Price Audit Executive Report"
 
             body = (
-                "Hello,\n\nPlease find attached your weekly automated Market Price"
-                " Audit Executive Report PDF.\n\nBest regards,\nAutomated Reporting"
-                " Bot"
+                "Hello,\n\n"
+                "Please find attached your weekly automated Market Price Audit"
+                " Executive Report PDF.\n\n"
+                "You can also explore the live interactive metrics on our"
+                f" dashboard here:\n{streamlit_url}\n\n"
+                "Best regards,\n"
+                "Market Price Audit Team"
             )
             msg.attach(MIMEText(body, "plain"))
 
