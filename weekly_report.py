@@ -19,7 +19,10 @@ SMTP_PASS = os.getenv("SMTP_PASSWORD", "")
 
 
 def get_all_subscribers():
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
     creds_raw = os.getenv("GOOGLE_SHEETS_CREDS")
 
     try:
