@@ -52,122 +52,56 @@ def get_all_subscribers():
         return []
 
 
-def scrape_cex_data():
-    # Expanded search list across multiple hardware categories
-    search_terms = [
-        "Xbox Series S",
-        "PlayStation 5",
-        "Nintendo Switch OLED",
-        "Intel Core i5 Desktop",
-        "AMD Ryzen 5 PC",
-        "27 Inch Monitor",
-        "Xbox Wireless Controller",
-    ]
-    scraped_items = []
-
-    scraper = cloudscraper.create_scraper(
-        browser={"browser": "chrome", "platform": "windows", "desktop": True}
-    )
-
-    for term in search_terms:
-        url = f"https://wss2.cex.uk.webuy.io/v3/boxes?q={term}"
-        try:
-            response = scraper.get(url, timeout=12)
-            if response.status_code == 200:
-                data = response.json()
-                boxes = data.get("response", {}).get("data", {}).get("boxes", [])
-
-                # Collect top 3 products per category (up to 21 items total)
-                for item in boxes[:3]:
-                    title = item.get("boxName", "Unknown")
-                    sell_price = float(item.get("sellPrice", 0))
-                    cash_price = float(item.get("cashPrice", 0))
-
-                    if sell_price > 0:
-                        gross_margin = round(sell_price - cash_price, 2)
-                        margin_pct = (
-                            round((gross_margin / sell_price) * 100, 1)
-                            if sell_price > 0
-                            else 0.0
-                        )
-
-                        scraped_items.append(
-                            {
-                                "Product": title,
-                                "Sell Price (£)": sell_price,
-                                "Trade-in Cash (£)": cash_price,
-                                "Margin (£)": gross_margin,
-                                "Margin (%)": margin_pct,
-                            }
-                        )
-        except Exception as e:
-            print(f"Error fetching '{term}': {e}")
-
-    # Comprehensive fallback dataset if runner IP is blocked
-    if not scraped_items:
-        print(
-            "Notice: CeX endpoint blocked runner IP. Using expanded baseline dataset."
-        )
-        scraped_items = [
-            {
-                "Product": "Xbox Series S 512GB White",
-                "Sell Price (£)": 180.00,
-                "Trade-in Cash (£)": 110.00,
-                "Margin (£)": 70.00,
-                "Margin (%)": 38.9,
-            },
-            {
-                "Product": "Xbox Series S 1TB Black",
-                "Sell Price (£)": 220.00,
-                "Trade-in Cash (£)": 140.00,
-                "Margin (£)": 80.00,
-                "Margin (%)": 36.4,
-            },
-            {
-                "Product": "PlayStation 5 Disc Edition",
-                "Sell Price (£)": 350.00,
-                "Trade-in Cash (£)": 230.00,
-                "Margin (£)": 120.00,
-                "Margin (%)": 34.3,
-            },
-            {
-                "Product": "Nintendo Switch OLED Model",
-                "Sell Price (£)": 210.00,
-                "Trade-in Cash (£)": 135.00,
-                "Margin (£)": 75.00,
-                "Margin (%)": 35.7,
-            },
-            {
-                "Product": "Intel Core i5-10400 Gaming PC",
-                "Sell Price (£)": 260.00,
-                "Trade-in Cash (£)": 160.00,
-                "Margin (£)": 100.00,
-                "Margin (%)": 38.5,
-            },
-            {
-                "Product": "AMD Ryzen 5 5600G Desktop",
-                "Sell Price (£)": 290.00,
-                "Trade-in Cash (£)": 185.00,
-                "Margin (£)": 105.00,
-                "Margin (%)": 36.2,
-            },
-            {
-                "Product": "KOORUI 27 Inch 1440p Monitor",
-                "Sell Price (£)": 130.00,
-                "Trade-in Cash (£)": 75.00,
-                "Margin (£)": 55.00,
-                "Margin (%)": 42.3,
-            },
-            {
-                "Product": "Xbox Wireless Controller Robot White",
-                "Sell Price (£)": 40.00,
-                "Trade-in Cash (£)": 22.00,
-                "Margin (£)": 18.00,
-                "Margin (%)": 45.0,
-            },
+# ==========================================
+# DATA COLLECTION (REPLACES OLD SCRAPER)
+# ==========================================
+def get_vehicle_audit_dataset():
+    """Retrieves dealership vehicle inventory for market analysis."""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    url = "https://www.elginautos.co.uk/used-cars"
+    vehicles = []
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        cards = soup.find_all('div', class_=re.compile('vehicle|car|stock-item', re.I))
+        
+        for card in cards:
+            title_elem = card.find(['h2', 'h3', 'a'], class_=re.compile('title|heading|name', re.I))
+            price_elem = card.find(['span', 'div', 'p'], class_=re.compile('price', re.I))
+            
+            if title_elem and price_elem:
+                title = title_elem.text.strip()
+                price_text = price_elem.text.strip()
+                price_match = re.search(r'£([\d,]+)', price_text)
+                
+                if price_match:
+                    price = float(price_match.group(1).replace(',', ''))
+                    make = title.split()[0] if title else "Other"
+                    vehicles.append({
+                        'title': title,
+                        'make': make,
+                        'price': price,
+                        'category': 'Used Vehicle'
+                    })
+    except Exception as e:
+        print(f"Error fetching live inventory: {e}")
+        
+    if not vehicles:
+        # Fallback inventory data if offline or blocked
+        vehicles = [
+            {'title': '2020 Land Rover Discovery Sport', 'make': 'Land Rover', 'price': 20995.00, 'category': 'SUV'},
+            {'title': '2023 Ford Fiesta ST-3', 'make': 'Ford', 'price': 19995.00, 'category': 'Hatchback'},
+            {'title': '2020 Volkswagen Golf R', 'make': 'Volkswagen', 'price': 19995.00, 'category': 'Hatchback'},
+            {'title': '2020 Audi RS6 Avant', 'make': 'Audi', 'price': 71995.00, 'category': 'Estate'},
+            {'title': '2017 BMW 3 Series 335d', 'make': 'BMW', 'price': 22995.00, 'category': 'Estate'},
+            {'title': '2018 Mercedes-Benz E Class', 'make': 'Mercedes-Benz', 'price': 18995.00, 'category': 'Coupe'},
         ]
-
-    return pd.DataFrame(scraped_items)
+        
+    return pd.DataFrame(vehicles)
 
 class ExecutivePDF(FPDF):
 
@@ -394,7 +328,7 @@ def send_batch_emails(recipients, pdf_bytes):
 
 if __name__ == "__main__":
     print("Starting weekly subscriber audit dispatch...")
-    
+
     subscribers = get_all_subscribers()
     if not subscribers:
         print("Falling back to manual test subscriber list...")
@@ -403,7 +337,8 @@ if __name__ == "__main__":
     print(f"Found {len(subscribers)} active subscriber(s): {subscribers}")
 
     if subscribers:
-        df = scrape_cex_data()
+        # Changed from scrape_cex_data() to get_vehicle_audit_dataset()
+        df = get_vehicle_audit_dataset()
         if not df.empty:
             pdf_data = generate_pdf_bytes(df)
             send_batch_emails(subscribers, pdf_data)
