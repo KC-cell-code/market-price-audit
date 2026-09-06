@@ -53,8 +53,17 @@ def get_all_subscribers():
 
 def scrape_cex_data():
     search_terms = ["Xbox Series S", "Intel Core i5 Desktop", "AMD Ryzen 5 Pro"]
+    
+    # Enhanced browser headers to avoid cloud IP blocks
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+        "Origin": "https://uk.webuy.com",
+        "Referer": "https://uk.webuy.com/",
     }
     scraped_items = []
 
@@ -62,28 +71,31 @@ def scrape_cex_data():
         url = f"https://wss2.cex.uk.webuy.io/v3/boxes?q={term}"
         try:
             response = requests.get(url, headers=headers, timeout=10)
+            print(f"CeX API response for '{term}': HTTP {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
                 boxes = data.get("response", {}).get("data", {}).get("boxes", [])
+                print(f"Found {len(boxes)} items for '{term}'.")
                 
-                # Take the top 3 results for each search term to fit the PDF layout
                 for item in boxes[:3]:
                     title = item.get("boxName", "Unknown")
                     sell_price = float(item.get("sellPrice", 0))
                     cash_price = float(item.get("cashPrice", 0))
                     
-                    # Mapping CeX prices to your existing PDF logic
                     scraped_items.append({
                         "Product": title,
                         "Client Price (£)": sell_price,
                         "Comp Avg (£)": cash_price,
                         "Difference (£)": round(sell_price - cash_price, 2),
                     })
+            else:
+                print(f"API Request failed with status code {response.status_code}")
+                
         except Exception as e:
             print(f"Error fetching '{term}' from CeX: {e}")
             
     return pd.DataFrame(scraped_items)
-
 
 def generate_pdf_bytes(audit_df):
     if audit_df.empty:
