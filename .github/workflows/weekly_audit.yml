@@ -18,7 +18,7 @@ jobs:
       - name: Install required Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install gspread google-auth pandas matplotlib requests fpdf2
+          pip install gspread google-auth pandas matplotlib requests fpdf2 cloudscraper
 
       - name: Run weekly report
         env:
