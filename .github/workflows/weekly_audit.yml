@@ -29,9 +29,8 @@ jobs:
         run: |
           echo "$GOOGLE_SHEETS_CREDS" > google_credentials.json
 
-      - name: Execute weekly report script
-        env:
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
-        run: |
-          python weekly_report.py
+      - - name: Run weekly report
+  env:
+    SMTP_USER: ${{ secrets.SMTP_USER }}
+    SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+  run: python weekly_report.py
