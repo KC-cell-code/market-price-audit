@@ -40,7 +40,7 @@ def get_all_subscribers():
 
     client = gspread.authorize(creds)
     sheet = client.open("Audit_Subscribers").sheet1
-    emails = sheet.col_values(1)
+    emails = sheet.col_values(1)[1:]
     # Filter out empty cells or header labels
     valid_emails = [
         e.strip() for e in emails if e and "@" in e and e.lower() != "email"
