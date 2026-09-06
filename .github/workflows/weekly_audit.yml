@@ -34,4 +34,5 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          STREAMLIT_URL: ${{ secrets.STREAMLIT_URL }}
         run: python weekly_report.py
