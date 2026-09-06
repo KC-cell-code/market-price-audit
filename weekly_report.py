@@ -19,6 +19,13 @@ SMTP_PASS = os.getenv("SMTP_PASSWORD", "")
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 
+# Use port 587 with starttls() and a 30-second timeout
+server = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
+server.starttls()  # Secure the connection
+server.login(SMTP_USER, SMTP_PASS)
+server.sendmail(SMTP_USER, recipient, msg.as_string())
+server.quit()
+
 
 def get_all_subscribers():
   scopes = ["https://www.googleapis.com/auth/spreadsheets"]
