@@ -231,12 +231,10 @@ def send_batch_emails(recipients, pdf_bytes):
         )
         return
 
-    # Replace with your actual Streamlit app URL or set STREAMLIT_URL in GitHub Secrets
+    # Replace with your actual Streamlit URL or set STREAMLIT_URL in GitHub Secrets
     streamlit_url = os.getenv(
         "STREAMLIT_URL", "https://your-app-name.streamlit.app"
     )
-
-    # Customize your sender display name (e.g., "Market Price Audit" or your name)
     sender_display_name = "Market Price Audit"
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
@@ -248,17 +246,37 @@ def send_batch_emails(recipients, pdf_bytes):
             msg["To"] = recipient
             msg["Subject"] = "Weekly Market Price Audit Executive Report"
 
-            body = (
-                "Hello,\n\n"
-                "Please find attached your weekly automated Market Price Audit"
-                " Executive Report PDF.\n\n"
-                "You can also explore the live interactive metrics on our"
-                f" dashboard here:\n{streamlit_url}\n\n"
-                "Best regards,\n"
-                "Market Price Audit Team"
-            )
-            msg.attach(MIMEText(body, "plain"))
+            # HTML Body with an inline CSS button
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+              <body style="font-family: Arial, sans-serif; color: #333333; line-height: 1.6; margin: 0; padding: 20px;">
+                <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; background-color: #ffffff;">
+                  <h2 style="color: #1E3A8A; margin-top: 0;">Weekly Market Price Audit</h2>
+                  <p>Hello,</p>
+                  <p>Please find attached your weekly automated Market Price Audit Executive Report PDF.</p>
+                  <p>You can also explore live interactive analytics and historical trends directly on our dashboard:</p>
+                  
+                  <div style="margin: 30px 0; text-align: left;">
+                    <a href="{streamlit_url}" target="_blank" style="background-color: #1E3A8A; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px; display: inline-block;">
+                      View Interactive Dashboard &rarr;
+                    </a>
+                  </div>
+                  
+                  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+                  <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">
+                    Best regards,<br>
+                    <strong style="color: #334155;">Market Price Audit Team</strong>
+                  </p>
+                </div>
+              </body>
+            </html>
+            """
 
+            # Attach the HTML message
+            msg.attach(MIMEText(html_body, "html"))
+
+            # Attach the PDF report
             part = MIMEApplication(pdf_bytes, Name="weekly_market_audit.pdf")
             part["Content-Disposition"] = (
                 'attachment; filename="weekly_market_audit.pdf"'
