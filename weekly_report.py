@@ -6,7 +6,6 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from bs4 import BeautifulSoup
 from fpdf import FPDF
 import gspread
 from google.oauth2.service_account import Credentials
@@ -19,7 +18,6 @@ SMTP_PASS = os.getenv("SMTP_PASSWORD", "")
 
 
 def get_all_subscribers():
-    # Define the required scopes for Google Sheets and Google Drive
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -44,7 +42,6 @@ def get_all_subscribers():
         sheet = client.open("Audit_Subscribers").sheet1
         emails = sheet.col_values(1)[1:]
         
-        # Filter out empty cells or header labels
         valid_emails = [
             e.strip() for e in emails if e and "@" in e and e.lower() != "email"
         ]
@@ -53,33 +50,38 @@ def get_all_subscribers():
         print(f"Error fetching subscribers from Google Sheets: {e}")
         return []
 
-def scrape_five_pages():
+
+def scrape_cex_data():
+    search_terms = ["Xbox Series S", "Intel Core i5 Desktop", "AMD Ryzen 5 Pro"]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     scraped_items = []
-    for page in range(1, 6):
-        url = f"http://books.toscrape.com/catalogue/page-{page}.html"
-        headers = {"User-Agent": "Mozilla/5.0"}
+
+    for term in search_terms:
+        url = f"https://wss2.cex.uk.webuy.io/v3/boxes?q={term}"
         try:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
-                soup = BeautifulSoup(response.content, "html.parser")
-                articles = soup.find_all("article", class_="product_pod")
-                for idx, article in enumerate(articles):
-                    title = article.h3.a["title"]
-                    price_text = article.find("p", class_="price_color").text
-                    store_price = float(
-                        "".join(c for c in price_text if c.isdigit() or c == ".")
-                    )
-                    multiplier = 0.90 if idx % 2 == 0 else 1.10
-                    benchmark_price = round(store_price * multiplier, 2)
-                    difference = round(store_price - benchmark_price, 2)
+                data = response.json()
+                boxes = data.get("response", {}).get("data", {}).get("boxes", [])
+                
+                # Take the top 3 results for each search term to fit the PDF layout
+                for item in boxes[:3]:
+                    title = item.get("boxName", "Unknown")
+                    sell_price = float(item.get("sellPrice", 0))
+                    cash_price = float(item.get("cashPrice", 0))
+                    
+                    # Mapping CeX prices to your existing PDF logic
                     scraped_items.append({
                         "Product": title,
-                        "Client Price (£)": store_price,
-                        "Comp Avg (£)": benchmark_price,
-                        "Difference (£)": difference,
+                        "Client Price (£)": sell_price,
+                        "Comp Avg (£)": cash_price,
+                        "Difference (£)": round(sell_price - cash_price, 2),
                     })
         except Exception as e:
-            print(f"Error scraping page {page}: {e}")
+            print(f"Error fetching '{term}' from CeX: {e}")
+            
     return pd.DataFrame(scraped_items)
 
 
@@ -109,14 +111,14 @@ def generate_pdf_bytes(audit_df):
         [i - width / 2 for i in x],
         comparison["Client Price (£)"],
         width,
-        label="Store Price",
+        label="Sell Price",
         color="#1E3A8A",
     )
     ax.bar(
         [i + width / 2 for i in x],
         comparison["Comp Avg (£)"],
         width,
-        label="Benchmark",
+        label="Cash Value",
         color="#64748B",
     )
     ax.set_xticks(x)
@@ -141,34 +143,17 @@ def generate_pdf_bytes(audit_df):
 
     pdf.set_font("Arial", "B", 11)
     pdf.set_text_color(30, 58, 138)
-    pdf.cell(0, 6, txt="Automated Market Insights:", ln=True)
+    pdf.cell(0, 6, txt="Automated Market Insights (CeX Hardware):", ln=True)
 
     pdf.set_font("Arial", "", 9)
     pdf.set_text_color(51, 65, 85)
     pos_direction = "HIGHER" if price_diff > 0 else "LOWER"
     insight_pos = (
-        f"* Positioning: Store catalog averages \xa3{abs(price_diff):.2f}"
-        f" {pos_direction} than market benchmark."
+        f"* Margin: Average retail sell price is \xa3{abs(price_diff):.2f}"
+        f" {pos_direction} than base trade-in value."
     )
     pdf.set_x(pdf.l_margin)
     pdf.multi_cell(0, 5, txt=str(insight_pos))
-
-    if overpriced_count > 0:
-        insight_risk = (
-            f"* Key Risk: {overpriced_count} product(s) priced above benchmark."
-        )
-        pdf.ln(2)
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 5, txt=str(insight_risk))
-
-    if underpriced_count > 0:
-        insight_opp = (
-            f"* Opportunity: {underpriced_count} product(s) priced below benchmark"
-            " (margin potential)."
-        )
-        pdf.ln(2)
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 5, txt=str(insight_opp))
 
     pdf.ln(4)
     pdf.image(temp_img_path, x=15, w=180)
@@ -180,9 +165,9 @@ def generate_pdf_bytes(audit_df):
     w_item, w_client, w_comp, w_diff = 75, 35, 40, 40
 
     pdf.cell(w_item, 7, "Product Name", border=1, align="C", fill=True)
-    pdf.cell(w_client, 7, "Store (\xa3)", border=1, align="C", fill=True)
-    pdf.cell(w_comp, 7, "Benchmark (\xa3)", border=1, align="C", fill=True)
-    pdf.cell(w_diff, 7, "Variance (\xa3)", border=1, align="C", fill=True)
+    pdf.cell(w_client, 7, "Sell (\xa3)", border=1, align="C", fill=True)
+    pdf.cell(w_comp, 7, "Trade-in (\xa3)", border=1, align="C", fill=True)
+    pdf.cell(w_diff, 7, "Gross Margin (\xa3)", border=1, align="C", fill=True)
     pdf.ln()
 
     pdf.set_font("Arial", "", 8)
@@ -235,7 +220,6 @@ def send_batch_emails(recipients, pdf_bytes):
         )
         return
 
-    # Replace with your actual Streamlit URL or set STREAMLIT_URL in GitHub Secrets
     streamlit_url = os.getenv(
         "STREAMLIT_URL", "https://your-app-name.streamlit.app"
     )
@@ -250,7 +234,6 @@ def send_batch_emails(recipients, pdf_bytes):
             msg["To"] = recipient
             msg["Subject"] = "Weekly Market Price Audit Executive Report"
 
-            # HTML Body with an inline CSS button
             html_body = f"""
             <!DOCTYPE html>
             <html>
@@ -277,10 +260,7 @@ def send_batch_emails(recipients, pdf_bytes):
             </html>
             """
 
-            # Attach the HTML message
             msg.attach(MIMEText(html_body, "html"))
-
-            # Attach the PDF report
             part = MIMEApplication(pdf_bytes, Name="weekly_market_audit.pdf")
             part["Content-Disposition"] = (
                 'attachment; filename="weekly_market_audit.pdf"'
@@ -294,10 +274,7 @@ def send_batch_emails(recipients, pdf_bytes):
 if __name__ == "__main__":
     print("Starting weekly subscriber audit dispatch...")
     
-    # Try fetching subscribers from Google Sheets first
     subscribers = get_all_subscribers()
-    
-    # Fallback to test list if Google Sheets returns no results
     if not subscribers:
         print("Falling back to manual test subscriber list...")
         subscribers = ["subredditspooks@gmail.com"]
@@ -305,7 +282,7 @@ if __name__ == "__main__":
     print(f"Found {len(subscribers)} active subscriber(s): {subscribers}")
 
     if subscribers:
-        df = scrape_five_pages()
+        df = scrape_cex_data()
         if not df.empty:
             pdf_data = generate_pdf_bytes(df)
             send_batch_emails(subscribers, pdf_data)
