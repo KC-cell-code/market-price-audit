@@ -19,9 +19,7 @@ SMTP_PASS = os.getenv("SMTP_PASSWORD", "")
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 
-# Use port 587 with starttls() and a 30-second timeout
-server = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
-server.starttls()  # Secure the connection
+server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
 server.login(SMTP_USER, SMTP_PASS)
 server.sendmail(SMTP_USER, recipient, msg.as_string())
 server.quit()
