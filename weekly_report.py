@@ -19,10 +19,11 @@ SMTP_PASS = os.getenv("SMTP_PASSWORD", "")
 
 
 def get_all_subscribers():
-    SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive'
-]
+    # Define the required scopes for Google Sheets and Google Drive
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
     creds_raw = os.getenv("GOOGLE_SHEETS_CREDS")
 
     try:
@@ -42,6 +43,7 @@ def get_all_subscribers():
         client = gspread.authorize(creds)
         sheet = client.open("Audit_Subscribers").sheet1
         emails = sheet.col_values(1)[1:]
+        
         # Filter out empty cells or header labels
         valid_emails = [
             e.strip() for e in emails if e and "@" in e and e.lower() != "email"
@@ -50,7 +52,6 @@ def get_all_subscribers():
     except Exception as e:
         print(f"Error fetching subscribers from Google Sheets: {e}")
         return []
-
 
 def scrape_five_pages():
     scraped_items = []
