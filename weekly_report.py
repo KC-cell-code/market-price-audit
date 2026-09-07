@@ -142,7 +142,7 @@ else:
     df["Margin (£)"] = (df["Sell Price (£)"] - df["Trade-in Cash (£)"]).round(2)
     df["Margin (%)"] = ((df["Margin (£)"] / df["Sell Price (£)"]) * 100).round(1)
 
-    return df
+        return df
 
 # ==========================================
 # 2. PDF GENERATION ENGINE
