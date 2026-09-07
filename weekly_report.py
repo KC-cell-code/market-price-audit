@@ -16,6 +16,7 @@ from fpdf import FPDF
 # ==========================================
 class MorayDealershipScraper:
     def __init__(self):
+        # Emulate standard browser headers
         self.scraper = cloudscraper.create_scraper(
             browser={"browser": "chrome", "platform": "windows", "desktop": True}
         )
@@ -23,7 +24,9 @@ class MorayDealershipScraper:
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            )
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
         }
 
     def _clean_price(self, text):
@@ -33,53 +36,65 @@ class MorayDealershipScraper:
         return float(match.group(1).replace(",", "")) if match else 0.0
 
     def scrape_elgin_autos(self):
-        # Corrected URL for Elgin Autos
         url = "https://www.elginautos.co.uk/used-cars"
         vehicles = []
         try:
-            res = self.scraper.get(url, headers=self.headers, timeout=12)
+            res = self.scraper.get(url, headers=self.headers, timeout=15)
+            print(f"[Elgin Autos] HTTP Status: {res.status_code}")
+            
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                cards = soup.select(".vehicle-card, .stock-card, .vehicle-listing, .listing-item")
+                # Broaden search to cover multiple CMS template styles
+                cards = soup.select(".vehicle-card, .stock-card, .vehicle-listing, .listing-item, article, .car-item")
+                
                 for card in cards:
-                    title = card.select_one(".vehicle-title, .title, h2, h3")
-                    price = card.select_one(".vehicle-price, .price, .amount")
+                    title = card.select_one(".vehicle-title, .title, h2, h3, .model-name, a")
+                    price = card.select_one(".vehicle-price, .price, .amount, .main-price")
                     if title and price:
                         p_val = self._clean_price(price.get_text())
-                        if p_val > 0:
+                        if p_val > 1000: # Filter out noise
                             vehicles.append({
                                 "Dealer": "Elgin Autos",
-                                "Product": title.get_text(strip=True),
+                                "Product": title.get_text(strip=True)[:40],
                                 "Sell Price (£)": p_val
                             })
+            else:
+                print(f"[Elgin Autos] Site returned status {res.status_code} (likely Cloudflare / IP block)")
         except Exception as e:
             print(f"[Elgin Autos] Scrape notice: {e}")
+            
+        print(f"[Elgin Autos] Retried and found {len(vehicles)} live vehicles.")
         return vehicles
 
     def scrape_hawco_elgin(self):
-        # Corrected URL for Hawco Group Elgin branch
         url = "https://www.hawcogroup.co.uk/used-cars/elgin/"
         vehicles = []
         try:
-            res = self.scraper.get(url, headers=self.headers, timeout=12)
+            res = self.scraper.get(url, headers=self.headers, timeout=15)
+            print(f"[Hawco Elgin] HTTP Status: {res.status_code}")
+            
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                cards = soup.select(".used-car-item, .vehicle-item, .card")
+                cards = soup.select(".used-car-item, .vehicle-item, .card, article, .listing")
+                
                 for card in cards:
-                    title = card.select_one(".car-title, h3, .heading")
-                    price = card.select_one(".price, .main-price")
+                    title = card.select_one(".car-title, h3, .heading, .title")
+                    price = card.select_one(".price, .main-price, .amount")
                     if title and price:
                         p_val = self._clean_price(price.get_text())
-                        if p_val > 0:
+                        if p_val > 1000:
                             vehicles.append({
                                 "Dealer": "Hawco Elgin",
-                                "Product": title.get_text(strip=True),
+                                "Product": title.get_text(strip=True)[:40],
                                 "Sell Price (£)": p_val
                             })
+            else:
+                print(f"[Hawco Elgin] Site returned status {res.status_code}")
         except Exception as e:
             print(f"[Hawco Elgin] Scrape notice: {e}")
+            
+        print(f"[Hawco Elgin] Retried and found {len(vehicles)} live vehicles.")
         return vehicles
-
     
 
 def get_vehicle_audit_dataset():
