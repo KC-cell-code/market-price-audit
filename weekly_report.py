@@ -5,7 +5,8 @@ import tempfile
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
+import re
+from bs4 import BeautifulSoup
 from fpdf import FPDF
 import gspread
 from google.oauth2.service_account import Credentials
@@ -56,7 +57,7 @@ def get_all_subscribers():
 # DATA COLLECTION (REPLACES OLD SCRAPER)
 # ==========================================
 def get_vehicle_audit_dataset():
-    """Retrieves dealership vehicle inventory for market analysis."""
+    """Retrieves dealership vehicle inventory formatted for PDF audit generation."""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -79,30 +80,43 @@ def get_vehicle_audit_dataset():
                 price_match = re.search(r'£([\d,]+)', price_text)
                 
                 if price_match:
-                    price = float(price_match.group(1).replace(',', ''))
-                    make = title.split()[0] if title else "Other"
+                    sell_price = float(price_match.group(1).replace(',', ''))
+                    # Estimated trade-in/cost baseline (~82% of retail)
+                    trade_in = round(sell_price * 0.82, 2)
+                    margin = round(sell_price - trade_in, 2)
+                    margin_pct = round((margin / sell_price) * 100, 1) if sell_price > 0 else 0.0
+                    
                     vehicles.append({
-                        'title': title,
-                        'make': make,
-                        'price': price,
-                        'category': 'Used Vehicle'
+                        'Product': title,
+                        'Sell Price (£)': sell_price,
+                        'Trade-in Cash (£)': trade_in,
+                        'Margin (£)': margin,
+                        'Margin (%)': margin_pct
                     })
     except Exception as e:
         print(f"Error fetching live inventory: {e}")
         
     if not vehicles:
-        # Fallback inventory data if offline or blocked
-        vehicles = [
-            {'title': '2020 Land Rover Discovery Sport', 'make': 'Land Rover', 'price': 20995.00, 'category': 'SUV'},
-            {'title': '2023 Ford Fiesta ST-3', 'make': 'Ford', 'price': 19995.00, 'category': 'Hatchback'},
-            {'title': '2020 Volkswagen Golf R', 'make': 'Volkswagen', 'price': 19995.00, 'category': 'Hatchback'},
-            {'title': '2020 Audi RS6 Avant', 'make': 'Audi', 'price': 71995.00, 'category': 'Estate'},
-            {'title': '2017 BMW 3 Series 335d', 'make': 'BMW', 'price': 22995.00, 'category': 'Estate'},
-            {'title': '2018 Mercedes-Benz E Class', 'make': 'Mercedes-Benz', 'price': 18995.00, 'category': 'Coupe'},
+        # Fallback inventory with matching column structure
+        raw_fallback = [
+            {'Product': '2020 Land Rover Discovery Sport', 'Sell Price (£)': 20995.00, 'Trade-in Cash (£)': 17200.00},
+            {'Product': '2023 Ford Fiesta ST-3', 'Sell Price (£)': 19995.00, 'Trade-in Cash (£)': 16400.00},
+            {'Product': '2020 Volkswagen Golf R', 'Sell Price (£)': 19995.00, 'Trade-in Cash (£)': 16200.00},
+            {'Product': '2020 Audi RS6 Avant', 'Sell Price (£)': 71995.00, 'Trade-in Cash (£)': 61000.00},
+            {'Product': '2017 BMW 3 Series 335d', 'Sell Price (£)': 22995.00, 'Trade-in Cash (£)': 18800.00},
+            {'Product': '2018 Mercedes-Benz E Class', 'Sell Price (£)': 18995.00, 'Trade-in Cash (£)': 15300.00},
         ]
-        
+        for item in raw_fallback:
+            sell = item['Sell Price (£)']
+            cash = item['Trade-in Cash (£)']
+            margin = round(sell - cash, 2)
+            margin_pct = round((margin / sell) * 100, 1)
+            item['Margin (£)'] = margin
+            item['Margin (%)'] = margin_pct
+            vehicles.append(item)
+            
     return pd.DataFrame(vehicles)
-
+    
 class ExecutivePDF(FPDF):
 
     def header(self):
