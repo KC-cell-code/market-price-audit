@@ -33,13 +33,14 @@ class MorayDealershipScraper:
         return float(match.group(1).replace(",", "")) if match else 0.0
 
     def scrape_elgin_autos(self):
-        url = "https://www.elginautosdirect.co.uk/used-cars"
+        # Corrected URL for Elgin Autos
+        url = "https://www.elginautos.co.uk/used-cars"
         vehicles = []
         try:
             res = self.scraper.get(url, headers=self.headers, timeout=12)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, "html.parser")
-                cards = soup.select(".vehicle-card, .stock-card, .vehicle-listing")
+                cards = soup.select(".vehicle-card, .stock-card, .vehicle-listing, .listing-item")
                 for card in cards:
                     title = card.select_one(".vehicle-title, .title, h2, h3")
                     price = card.select_one(".vehicle-price, .price, .amount")
@@ -56,7 +57,8 @@ class MorayDealershipScraper:
         return vehicles
 
     def scrape_hawco_elgin(self):
-        url = "https://www.hawcogroup.co.uk/used-cars"
+        # Corrected URL for Hawco Group Elgin branch
+        url = "https://www.hawcogroup.co.uk/used-cars/elgin/"
         vehicles = []
         try:
             res = self.scraper.get(url, headers=self.headers, timeout=12)
@@ -77,6 +79,8 @@ class MorayDealershipScraper:
         except Exception as e:
             print(f"[Hawco Elgin] Scrape notice: {e}")
         return vehicles
+
+    
 
 def get_vehicle_audit_dataset():
     scraper = MorayDealershipScraper()
