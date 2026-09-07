@@ -112,8 +112,13 @@ class MorayDealershipScraper:
 
 def get_vehicle_audit_dataset():
     scraper = MorayDealershipScraper()
-    items = scraper.scrape_elgin_autos() + scraper.scrape_hawco_elgin()
+live_data = scraper.run_all()
 
+if live_data:
+    df = pd.DataFrame(live_data)
+else:
+    print("Notice: Live dealership sites unreachable. Using Moray market baseline dataset.")
+    # Fallback dataset logic here...
     # Fallback dataset if live sites block datacenter IPs during automated run
     if not items:
         print("Notice: Live dealership sites unreachable. Using Moray market baseline dataset.")
