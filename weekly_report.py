@@ -10,92 +10,105 @@ import cloudscraper
 import pandas as pd
 import matplotlib.pyplot as plt
 from fpdf import FPDF
+from playwright.sync_api import sync_playwright
 
 # ==========================================
 # 1. SCRAPER & DATA PREPARATION
 # ==========================================
-class MorayDealershipScraper:
-    def __init__(self):
-        # Emulate standard browser headers
-        self.scraper = cloudscraper.create_scraper(
-            browser={"browser": "chrome", "platform": "windows", "desktop": True}
-        )
-        self.headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
-        }
+# ==========================================
+# 1. SCRAPER & DATA PREPARATION (Playwright)
+# ==========================================
+import re
+from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
+class MorayDealershipScraper:
     def _clean_price(self, text):
         if not text:
             return 0.0
         match = re.search(r"£?\s*([\d,]+)", text)
         return float(match.group(1).replace(",", "")) if match else 0.0
 
-    def scrape_elgin_autos(self):
+    def scrape_elgin_autos(self, page):
         url = "https://www.elginautos.co.uk/used-cars"
         vehicles = []
         try:
-            res = self.scraper.get(url, headers=self.headers, timeout=15)
-            print(f"[Elgin Autos] HTTP Status: {res.status_code}")
+            print("[Elgin Autos] Navigating via Playwright...")
+            # Wait for network idle to ensure Cloudflare challenge passes
+            page.goto(url, wait_until="networkidle", timeout=30000)
             
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, "html.parser")
-                # Broaden search to cover multiple CMS template styles
-                cards = soup.select(".vehicle-card, .stock-card, .vehicle-listing, .listing-item, article, .car-item")
-                
-                for card in cards:
-                    title = card.select_one(".vehicle-title, .title, h2, h3, .model-name, a")
-                    price = card.select_one(".vehicle-price, .price, .amount, .main-price")
-                    if title and price:
-                        p_val = self._clean_price(price.get_text())
-                        if p_val > 1000: # Filter out noise
-                            vehicles.append({
-                                "Dealer": "Elgin Autos",
-                                "Product": title.get_text(strip=True)[:40],
-                                "Sell Price (£)": p_val
-                            })
-            else:
-                print(f"[Elgin Autos] Site returned status {res.status_code} (likely Cloudflare / IP block)")
+            # Wait for vehicle cards to render
+            page.wait_for_selector(".vehicle-card, .listing-item, article, .car-item", timeout=10000)
+            
+            soup = BeautifulSoup(page.content(), "html.parser")
+            cards = soup.select(".vehicle-card, .listing-item, article, .car-item, .card")
+            
+            for card in cards:
+                title = card.select_one(".vehicle-title, .title, h2, h3, .model-name, a")
+                price = card.select_one(".vehicle-price, .price, .amount, .main-price")
+                if title and price:
+                    p_val = self._clean_price(price.get_text())
+                    if p_val > 1000:
+                        vehicles.append({
+                            "Dealer": "Elgin Autos",
+                            "Product": title.get_text(strip=True)[:40],
+                            "Sell Price (£)": p_val
+                        })
         except Exception as e:
             print(f"[Elgin Autos] Scrape notice: {e}")
             
-        print(f"[Elgin Autos] Retried and found {len(vehicles)} live vehicles.")
+        print(f"[Elgin Autos] Found {len(vehicles)} live vehicles.")
         return vehicles
 
-    def scrape_hawco_elgin(self):
+    def scrape_hawco_elgin(self, page):
         url = "https://www.hawcogroup.co.uk/used-cars/elgin/"
         vehicles = []
         try:
-            res = self.scraper.get(url, headers=self.headers, timeout=15)
-            print(f"[Hawco Elgin] HTTP Status: {res.status_code}")
+            print("[Hawco Elgin] Navigating via Playwright...")
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
             
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, "html.parser")
-                cards = soup.select(".used-car-item, .vehicle-item, .card, article, .listing")
-                
-                for card in cards:
-                    title = card.select_one(".car-title, h3, .heading, .title")
-                    price = card.select_one(".price, .main-price, .amount")
-                    if title and price:
-                        p_val = self._clean_price(price.get_text())
-                        if p_val > 1000:
-                            vehicles.append({
-                                "Dealer": "Hawco Elgin",
-                                "Product": title.get_text(strip=True)[:40],
-                                "Sell Price (£)": p_val
-                            })
-            else:
-                print(f"[Hawco Elgin] Site returned status {res.status_code}")
+            # Allow dynamic JS content to hydrate
+            page.wait_for_timeout(3000)
+            
+            soup = BeautifulSoup(page.content(), "html.parser")
+            # Hawco / John Clark layout card selectors
+            cards = soup.select(".used-car-item, .vehicle-card, .card, article, .vehicle-item, .listing")
+            
+            for card in cards:
+                title = card.select_one(".car-title, h3, .heading, .title, .vehicle-name")
+                price = card.select_one(".price, .main-price, .amount, .vehicle-price")
+                if title and price:
+                    p_val = self._clean_price(price.get_text())
+                    if p_val > 1000:
+                        vehicles.append({
+                            "Dealer": "Hawco Elgin",
+                            "Product": title.get_text(strip=True)[:40],
+                            "Sell Price (£)": p_val
+                        })
         except Exception as e:
             print(f"[Hawco Elgin] Scrape notice: {e}")
             
-        print(f"[Hawco Elgin] Retried and found {len(vehicles)} live vehicles.")
+        print(f"[Hawco Elgin] Found {len(vehicles)} live vehicles.")
         return vehicles
-    
+
+    def run_all(self):
+        all_vehicles = []
+        with sync_playwright() as p:
+            # Launch chromium with anti-bot detection evasions
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800}
+            )
+            page = context.new_page()
+            
+            all_vehicles.extend(self.scrape_elgin_autos(page))
+            all_vehicles.extend(self.scrape_hawco_elgin(page))
+            
+            browser.close()
+            
+        return all_vehicles
+       
 
 def get_vehicle_audit_dataset():
     scraper = MorayDealershipScraper()
